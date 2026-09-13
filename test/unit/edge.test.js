@@ -41,6 +41,14 @@ test('converts a POS sale into a demand event', () => {
   assert.equal(event.data.source, 'pos');
 });
 
+test('rejects a POS sale with zero quantity', () => {
+  const edge = createEdgeProcessor();
+  assert.throws(() => edge.processPos({
+    store: 'store-01', skuId: 'milk-1l', qty: 0,
+    txnId: 'txn-empty', ts: 20
+  }), /greater than zero/);
+});
+
 test('emits one breach and one clear event with hysteresis', () => {
   const edge = createEdgeProcessor({
     temperatureSamples: 2,

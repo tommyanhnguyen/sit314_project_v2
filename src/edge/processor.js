@@ -14,14 +14,14 @@ function createEdgeProcessor(options = {}) {
 
   function processShelf(reading) {
     const { store, shelfId, skuId, grams, ts } = reading;
-    const wallTs = reading.wallTs ?? ts;
+    const wallTs = reading.wallTs ?? Date.now();
     const item = getSku(skuId);
     const key = store + '/' + shelfId;
     const current = shelves.get(key);
 
     if (!current) {
       const opening = Math.round(grams / item.unitWeight);
-      shelves.set(key, { settledGrams: opening * item.unitWeight, pendingGrams: grams, pendingAt: wallTs });
+      shelves.set(key, { settledGrams: opening * item.unitWeight, pendingGrams: grams, pendingAt: ts });
       if (opening <= 0) return null;
       return createEvent('stock.delta', store, {
         skuId, shelfId, delta: opening, source: 'opening', wallTs
@@ -31,12 +31,12 @@ function createEdgeProcessor(options = {}) {
     const band = item.unitWeight * settleBandItems;
     if (Math.abs(grams - current.pendingGrams) > band) {
       current.pendingGrams = grams;
-      current.pendingAt = wallTs;
+      current.pendingAt = ts;
       return null;
     }
 
     current.pendingGrams = (current.pendingGrams + grams) / 2;
-    if (wallTs - current.pendingAt < debounceMs) return null;
+    if (ts - current.pendingAt < debounceMs) return null;
 
     const itemDelta = (current.pendingGrams - current.settledGrams) / item.unitWeight;
     if (Math.abs(itemDelta) < minimumItemDelta) return null;
@@ -45,7 +45,7 @@ function createEdgeProcessor(options = {}) {
     if (delta === 0) return null;
 
     current.settledGrams += delta * item.unitWeight;
-    current.pendingAt = wallTs;
+    current.pendingAt = ts;
     return createEvent('stock.delta', store, {
       skuId, shelfId, delta, source: 'shelf', wallTs
     }, { ts });
@@ -53,6 +53,9 @@ function createEdgeProcessor(options = {}) {
 
   function processPos(sale) {
     getSku(sale.skuId);
+    if (!Number.isFinite(sale.qty) || sale.qty <= 0) {
+      throw new Error('POS quantity must be greater than zero');
+    }
     return createEvent('stock.delta', sale.store, {
       skuId: sale.skuId,
       delta: -Math.abs(sale.qty),

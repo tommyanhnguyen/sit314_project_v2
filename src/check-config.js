@@ -3,7 +3,8 @@ const fs = require('node:fs');
 const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
 const flows = JSON.parse(fs.readFileSync('node-red/flows.json', 'utf8'));
 const requiredScripts = [
-  'test', 'demo', 'load-test', 'broker', 'api', 'simulator',
+  'test', 'demo', 'load-test', 'evidence', 'broker', 'api', 'simulator',
+  'node-red', 'watch',
   'inventory', 'replenishment', 'cold-chain', 'delivery', 'dead-letter'
 ];
 

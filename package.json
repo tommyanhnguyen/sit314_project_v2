@@ -1,12 +1,13 @@
 {
   "name": "shelfsense-v2",
-  "version": "0.1.0",
-  "description": "Local complete ShelfSense IoT system for SIT314",
+  "version": "0.2.0",
+  "description": "Reliable local ShelfSense IoT system for SIT314",
   "main": "src/demo.js",
   "scripts": {
     "test": "node --test test/**/*.test.js",
     "demo": "node src/demo.js",
     "load-test": "node src/load-test.js",
+    "evidence": "node src/evidence.js",
     "broker": "node src/broker.js",
     "api": "node src/api/server.js",
     "simulator": "node src/simulator.js",
@@ -15,8 +16,11 @@
     "cold-chain": "SERVICE_NAME=cold-chain node src/service-runner.js",
     "delivery": "SERVICE_NAME=delivery node src/service-runner.js",
     "dead-letter": "SERVICE_NAME=dead-letter node src/service-runner.js",
+    "node-red": "npx --yes node-red@4.0.9 --userDir node-red",
+    "watch": "mqtt sub -t \"shelfsense/#\" -h localhost -v",
     "check-config": "node src/check-config.js && docker compose config --quiet",
-    "check": "npm test && npm run demo && npm run load-test && npm run check-config"
+    "check": "npm test && npm run demo && npm run load-test && npm run check-config",
+    "check-ci": "npm test && npm run demo && npm run load-test && node src/check-config.js"
   },
   "engines": {
     "node": ">=20"

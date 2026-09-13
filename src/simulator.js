@@ -12,9 +12,9 @@ function createSimulation(options = {}) {
       const posTopic = `shelfsense/raw/${store}/pos`;
       const fridgeTopic = `shelfsense/raw/${store}/fridge/fridge-1`;
 
-      await publish(shelfTopic, { store, shelfId: 'shelf-1', skuId: 'milk-1l', grams: 10000, ts: 0, wallTs: 0 });
-      await publish(shelfTopic, { store, shelfId: 'shelf-1', skuId: 'milk-1l', grams: 2000, ts: 100, wallTs: 100 });
-      await publish(shelfTopic, { store, shelfId: 'shelf-1', skuId: 'milk-1l', grams: 2000, ts: 1000, wallTs: 1000 });
+      await publish(shelfTopic, { store, shelfId: 'shelf-1', skuId: 'milk-1l', grams: 10000, ts: 0, wallTs: Date.now() });
+      await publish(shelfTopic, { store, shelfId: 'shelf-1', skuId: 'milk-1l', grams: 2000, ts: 100, wallTs: Date.now() });
+      await publish(shelfTopic, { store, shelfId: 'shelf-1', skuId: 'milk-1l', grams: 2000, ts: 1000, wallTs: Date.now() });
 
       for (let sale = 0; sale < 3; sale += 1) {
         await publish(posTopic, {
@@ -37,6 +37,12 @@ function createSimulation(options = {}) {
 }
 
 async function runSimulator() {
+  const startupDelayMs = Number(process.env.STARTUP_DELAY_MS || 0);
+  if (startupDelayMs > 0) {
+    console.log('Waiting ' + startupDelayMs + ' ms for Node-RED');
+    await new Promise(resolve => setTimeout(resolve, startupDelayMs));
+  }
+
   const client = await connectMqtt(config.mqttUrl, 'shelfsense-simulator-' + process.pid);
   const simulation = createSimulation({
     stores: Number(process.env.STORES || 2),

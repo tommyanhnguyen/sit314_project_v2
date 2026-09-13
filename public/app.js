@@ -26,6 +26,12 @@ async function approve(orderId) {
   await loadData();
 }
 
+async function complete(deliveryId) {
+  const response = await fetch(`/api/deliveries/${encodeURIComponent(deliveryId)}/complete`, { method: 'POST' });
+  if (!response.ok) throw new Error((await response.json()).error);
+  await loadData();
+}
+
 async function loadData() {
   status.textContent = 'Loading...';
   try {
@@ -53,7 +59,9 @@ async function loadData() {
     containers.deliveries.innerHTML = deliveries.map(delivery => card([
       `<strong>${escapeHtml(delivery.deliveryId)}</strong>`,
       `${escapeHtml(delivery.store)} · ${escapeHtml(delivery.status)}`
-    ])).join('') || '<p>No deliveries.</p>';
+    ], ['PLANNED', 'RESTOCK_PENDING'].includes(delivery.status)
+      ? `<button data-delivery="${escapeHtml(delivery.deliveryId)}">Mark arrived</button>`
+      : '')).join('') || '<p>No deliveries.</p>';
 
     status.textContent = 'Data updated.';
   } catch (error) {
@@ -64,6 +72,10 @@ async function loadData() {
 containers.orders.addEventListener('click', event => {
   const orderId = event.target.dataset.order;
   if (orderId) approve(orderId).catch(error => { status.textContent = error.message; });
+});
+containers.deliveries.addEventListener('click', event => {
+  const deliveryId = event.target.dataset.delivery;
+  if (deliveryId) complete(deliveryId).catch(error => { status.textContent = error.message; });
 });
 document.querySelector('#refresh').addEventListener('click', loadData);
 loadData();

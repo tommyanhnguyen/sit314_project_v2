@@ -50,6 +50,38 @@ test('approves a pending order and publishes the decision', async t => {
   assert.equal(api.published[0].type, 'order.approved');
 });
 
+test('completes a delivery and releases its order', async t => {
+  const api = await startTestApi();
+  t.after(() => new Promise(resolve => api.server.close(resolve)));
+  await api.store.saveOrder({
+    orderId: 'order-2',
+    store: 'store-01',
+    openKey: 'store-01/milk-1l',
+    lines: [{ skuId: 'milk-1l', qty: 6 }],
+    status: 'IN_DELIVERY'
+  });
+  await api.store.saveDelivery({
+    deliveryId: 'delivery-2', orderId: 'order-2', store: 'store-01', status: 'PLANNED'
+  });
+
+  const response = await fetch(api.baseUrl + '/api/deliveries/delivery-2/complete', { method: 'POST' });
+  const delivery = await response.json();
+  const order = await api.store.getOrder('order-2');
+
+  assert.equal(response.status, 200);
+  assert.equal(delivery.status, 'DELIVERED');
+  assert.equal(order.openKey, undefined);
+  assert.ok(api.published.some(event => event.type === 'stock.delta'));
+});
+
+test('returns 404 for an unknown delivery', async t => {
+  const api = await startTestApi();
+  t.after(() => new Promise(resolve => api.server.close(resolve)));
+
+  const response = await fetch(api.baseUrl + '/api/deliveries/missing/complete', { method: 'POST' });
+  assert.equal(response.status, 404);
+});
+
 test('serves the manager portal', async t => {
   const api = await startTestApi();
   t.after(() => new Promise(resolve => api.server.close(resolve)));

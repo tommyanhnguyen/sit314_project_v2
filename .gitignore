@@ -1,5 +1,17 @@
 node_modules/
 .env
 report_evidence/
+report/
+project_status.docx
+project_status.pdf
+~$*.docx
 npm-debug.log*
 .DS_Store
+
+node-red/.config.*
+node-red/.sessions.json
+node-red/flows_cred.json
+node-red/lib/
+node-red/node_modules/
+node-red/.npm/
+.worktrees/

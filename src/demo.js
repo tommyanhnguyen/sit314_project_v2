@@ -71,9 +71,16 @@ async function runLocalDemo(options = {}) {
     }
   }
 
+  for (const planned of await store.listDeliveries()) {
+    if (planned.status === 'PLANNED') await delivery.complete(planned.deliveryId);
+  }
+
+  const stockRows = await store.listStock();
   const result = {
-    stock: (await store.listStock()).length,
+    stock: stockRows.length,
+    stockOnHand: stockRows.reduce((total, row) => total + row.qty, 0),
     orders: (await store.listOrders()).length,
+    ordersDelivered: (await store.listOrders()).filter(order => order.status === 'DELIVERED').length,
     alerts: (await store.listAlerts()).length,
     deliveries: (await store.listDeliveries()).length,
     deadLetters: (await store.listDeadLetters()).length,

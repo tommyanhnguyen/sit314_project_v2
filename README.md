@@ -4,6 +4,15 @@ ShelfSense is a local IoT stock management system for the SIT314 Distinction pro
 
 This version completes the local phase. AWS deployment, CloudWatch scaling evidence, IAM, and X.509 certificates remain in the next phase.
 
+## Review improvements
+
+1. A delivered order releases its open order key, so the same SKU can be ordered again.
+2. Delivery restock is retryable when MQTT publication fails.
+3. Invalid stock sources and invalid POS quantities are rejected.
+4. Sensor timestamps are separate from processing latency timestamps.
+5. Backlog is measured while producer and consumers run together.
+6. Node-RED routes malformed JSON to the dead letter topic.
+
 ## What is included
 
 1. Node.js shelf, POS, and fridge simulation.
@@ -41,9 +50,10 @@ npm install
 npm test
 npm run demo
 npm run load-test
+npm run evidence
 ```
 
-The demo uses the same domain services with an in memory adapter. It creates stock rows, replenishment orders, cold-chain alerts, and deliveries.
+The demo uses the same domain services with an in memory adapter. It runs the complete local loop from sensing to order approval, delivery completion, and restocking.
 
 ## Full local system
 
@@ -64,6 +74,8 @@ Open these local pages:
 1. Manager portal: `http://localhost:3000`
 2. Node-RED editor: `http://localhost:1880`
 
+`NODE_RED_TESTING.md` explains the automated and live edge flow checks.
+
 Stop the system:
 
 ```bash
@@ -72,7 +84,7 @@ docker compose down
 
 ## MongoDB Atlas
 
-Docker Compose uses local MongoDB by default. To use Atlas outside Docker, set `MONGODB_URI` in your local `.env` or terminal environment.
+Docker Compose uses local MongoDB by default. Set `MONGODB_URI` for services started directly on your computer. Set `DOCKER_MONGODB_URI` when Docker services should connect to Atlas.
 
 Never place an Atlas username or password in source code. `.env.example` contains safe variable names only.
 
@@ -99,6 +111,7 @@ Never place an Atlas username or password in source code. `.env.example` contain
 | GET | `/api/alerts` | Cold-chain alerts |
 | GET | `/api/deliveries` | Planned deliveries |
 | POST | `/api/orders/:id/approve` | Manager approval |
+| POST | `/api/deliveries/:id/complete` | Complete a delivery and restock the shelf |
 
 Approval body:
 
@@ -110,7 +123,11 @@ Approval body:
 
 ## Local metrics
 
-`npm run load-test` reports event count, elapsed time, throughput, median latency, p95 latency, and peak backlog. These values prepare the later AWS comparison. They are not AWS scaling evidence.
+`npm run load-test` reports processed events, elapsed time, throughput, median latency, p95 latency, peak backlog, and mean backlog. Producer and consumers run together.
+
+This is an in-process baseline. It does not use MQTT or MongoDB. It prepares the later AWS comparison, but it is not AWS scaling evidence.
+
+`npm run evidence` runs the demo and several consumer settings. It writes reproducible report data inside the ignored `report_evidence/` directory.
 
 ## Current security boundary
 

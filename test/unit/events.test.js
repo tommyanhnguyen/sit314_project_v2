@@ -38,6 +38,13 @@ test('rejects an unknown event type', () => {
   assert.throws(() => validateEvent(event), /Unknown event type/);
 });
 
+test('rejects an unknown stock source', () => {
+  const event = createEvent('stock.delta', 'store-01', {
+    skuId: 'milk-1l', delta: 1, source: 'manual'
+  });
+  assert.throws(() => validateEvent(event), /source/);
+});
+
 test('returns known SKU data and rejects unknown SKUs', () => {
   assert.equal(getSku('milk-1l').unitWeight, 1000);
   assert.throws(() => getSku('missing'), /Unknown SKU/);

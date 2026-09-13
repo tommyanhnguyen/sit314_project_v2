@@ -1,4 +1,5 @@
 const { createEvent, validateEvent } = require('../shared/events');
+const { newStockRow } = require('../shared/persistence');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const PHYSICAL_SOURCES = new Set(['shelf', 'opening', 'delivery']);
@@ -22,7 +23,8 @@ function createInventoryService(options) {
       await store.recordSale(event);
     }
 
-    const row = await store.getStock(event.store, event.data.skuId);
+    const row = await store.getStock(event.store, event.data.skuId)
+      || newStockRow(event.store, event.data.skuId);
     updateVelocity(row, minSales, minWindowMs);
     row.updatedAt = event.ts;
     await store.saveStock(row);

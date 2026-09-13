@@ -5,6 +5,7 @@ const config = require('../shared/config');
 const { MongoStore } = require('../shared/persistence');
 const { createEvent } = require('../shared/events');
 const { connectMqtt, eventTopic, publishJson } = require('../shared/mqtt');
+const { createDeliveryService } = require('../services/delivery');
 
 const CONTENT_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -28,6 +29,7 @@ async function readJson(request) {
 
 function createApiServer(options) {
   const { store, publish } = options;
+  const deliveries = createDeliveryService({ store, publish });
   const publicDir = path.resolve(options.publicDir || path.join(__dirname, '../../public'));
 
   return http.createServer(async (request, response) => {
@@ -68,6 +70,15 @@ function createApiServer(options) {
         });
         await publish(event);
         return sendJson(response, 200, order);
+      }
+
+      const completion = url.pathname.match(/^\/api\/deliveries\/([^/]+)\/complete$/);
+      if (request.method === 'POST' && completion) {
+        const deliveryId = decodeURIComponent(completion[1]);
+        if (!await store.getDelivery(deliveryId)) {
+          return sendJson(response, 404, { error: 'Delivery not found' });
+        }
+        return sendJson(response, 200, await deliveries.complete(deliveryId));
       }
 
       if (request.method !== 'GET') return sendJson(response, 404, { error: 'Not found' });

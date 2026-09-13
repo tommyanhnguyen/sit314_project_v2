@@ -5,7 +5,9 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
-COPY src ./src
-COPY public ./public
+COPY --chown=node:node src ./src
+COPY --chown=node:node public ./public
 
-CMD ["npm", "run", "api"]
+USER node
+
+CMD ["node", "src/api/server.js"]

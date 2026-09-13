@@ -1,10 +1,12 @@
 const { randomUUID } = require('node:crypto');
 
+const STOCK_SOURCES = new Set(['opening', 'shelf', 'delivery', 'pos']);
+
 const RULES = {
   'stock.delta': {
     skuId: 'string',
     delta: 'number',
-    source: 'string'
+    source: 'stockSource'
   },
   'stock.updated': {
     skuId: 'string',
@@ -56,6 +58,7 @@ function isValidType(value, expected) {
   if (expected === 'array') return Array.isArray(value);
   if (expected === 'number') return Number.isFinite(value);
   if (expected === 'nullableNumber') return value === null || Number.isFinite(value);
+  if (expected === 'stockSource') return STOCK_SOURCES.has(value);
   return typeof value === expected && value.length > 0;
 }
 
@@ -77,4 +80,4 @@ function validateEvent(event) {
   return event;
 }
 
-module.exports = { RULES, createEvent, validateEvent };
+module.exports = { RULES, STOCK_SOURCES, createEvent, validateEvent };
