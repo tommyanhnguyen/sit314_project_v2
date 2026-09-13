@@ -1,0 +1,31 @@
+{
+  "name": "shelfsense-v2",
+  "version": "0.1.0",
+  "description": "Local complete ShelfSense IoT system for SIT314",
+  "main": "src/demo.js",
+  "scripts": {
+    "test": "node --test test/**/*.test.js",
+    "demo": "node src/demo.js",
+    "load-test": "node src/load-test.js",
+    "broker": "node src/broker.js",
+    "api": "node src/api/server.js",
+    "simulator": "node src/simulator.js",
+    "inventory": "SERVICE_NAME=inventory node src/service-runner.js",
+    "replenishment": "SERVICE_NAME=replenishment node src/service-runner.js",
+    "cold-chain": "SERVICE_NAME=cold-chain node src/service-runner.js",
+    "delivery": "SERVICE_NAME=delivery node src/service-runner.js",
+    "dead-letter": "SERVICE_NAME=dead-letter node src/service-runner.js",
+    "check-config": "node src/check-config.js && docker compose config --quiet",
+    "check": "npm test && npm run demo && npm run load-test && npm run check-config"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "author": "Tommy Nguyen 224345482",
+  "license": "ISC",
+  "dependencies": {
+    "aedes": "^1.1.2",
+    "mongoose": "^8.9.5",
+    "mqtt": "^5.10.1"
+  }
+}

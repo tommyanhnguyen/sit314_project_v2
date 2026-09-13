@@ -1,0 +1,129 @@
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  broker:
+    build: .
+    command: npm run broker
+    restart: unless-stopped
+    environment:
+      MQTT_PORT: 1883
+    ports:
+      - "1883:1883"
+    healthcheck:
+      test: ["CMD", "node", "-e", "const s=require('net').connect(1883,'127.0.0.1',()=>{s.end();process.exit(0)});s.on('error',()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  node-red:
+    image: nodered/node-red:4.0.9
+    restart: unless-stopped
+    depends_on:
+      broker:
+        condition: service_healthy
+    environment:
+      MQTT_HOST: broker
+      MQTT_PORT: 1883
+      NODE_RED_OPTIONS: "--settings /data/settings.js"
+    ports:
+      - "1880:1880"
+    volumes:
+      - ./node-red/settings.js:/data/settings.js:ro
+      - ./node-red/flows.json:/data/flows.json:ro
+      - ./src/edge:/data/edge:ro
+      - ./src/shared:/data/shared:ro
+
+  inventory:
+    build: .
+    command: npm run inventory
+    restart: unless-stopped
+    depends_on:
+      broker:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    environment: &service-environment
+      MQTT_URL: mqtt://broker:1883
+      MONGODB_URI: mongodb://mongo:27017/shelfsense
+
+  replenishment:
+    build: .
+    command: npm run replenishment
+    restart: unless-stopped
+    depends_on:
+      broker:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    environment: *service-environment
+
+  cold-chain:
+    build: .
+    command: npm run cold-chain
+    restart: unless-stopped
+    depends_on:
+      broker:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    environment: *service-environment
+
+  delivery:
+    build: .
+    command: npm run delivery
+    restart: unless-stopped
+    depends_on:
+      broker:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    environment: *service-environment
+
+  dead-letter:
+    build: .
+    command: npm run dead-letter
+    restart: unless-stopped
+    depends_on:
+      broker:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    environment: *service-environment
+
+  api:
+    build: .
+    command: npm run api
+    restart: unless-stopped
+    depends_on:
+      broker:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    environment:
+      <<: *service-environment
+      PORT: 3000
+    ports:
+      - "3000:3000"
+
+  simulator:
+    build: .
+    command: npm run simulator
+    profiles: ["demo"]
+    depends_on:
+      node-red:
+        condition: service_started
+    environment:
+      MQTT_URL: mqtt://broker:1883
+      STORES: 2
+
+volumes:
+  mongo-data:
