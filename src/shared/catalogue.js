@@ -26,6 +26,7 @@ const ITEMS = {
 };
 
 function getSku(skuId) {
+  if (!Object.hasOwn(ITEMS, skuId)) throw new Error('Unknown SKU: ' + skuId);
   const item = ITEMS[skuId];
   if (!item) throw new Error('Unknown SKU: ' + skuId);
   return item;

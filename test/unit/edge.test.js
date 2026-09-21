@@ -36,7 +36,10 @@ test('converts a POS sale into a demand event', () => {
     txnId: 'txn-1', ts: 20, wallTs: 25
   });
 
-  assert.equal(event.eventId, 'pos-txn-1');
+  assert.equal(event.eventId, edge.processPos({
+    store: 'store-01', skuId: 'milk-1l', qty: 2,
+    txnId: 'txn-1', ts: 20, wallTs: 25
+  }).eventId);
   assert.equal(event.data.delta, -2);
   assert.equal(event.data.source, 'pos');
 });

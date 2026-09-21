@@ -2,7 +2,15 @@
 
 ShelfSense is a local IoT stock management system for the SIT314 Distinction project.
 
-This version completes the local phase. AWS deployment, CloudWatch scaling evidence, IAM, and X.509 certificates remain in the next phase.
+This version demonstrates the local business loop. The final audit found open recovery and concurrency gaps. AWS deployment, CloudWatch scaling evidence, IAM, and X.509 certificates remain in the next phase.
+
+## Final project audit: 22 September 2026
+
+Read [the audit](docs/FINAL_PROJECT_AUDIT.md) for progress against the original brief, the project plan and tutor feedback. [The checklist](docs/FINAL_PROJECT_CHECKLIST.md) lists the remaining assessment work.
+
+`npm run check` verifies the current regression suite and local demo. It does not prove AWS readiness. Run `node scripts/audit-local-gaps.js` to reproduce four open recovery and concurrency findings. That diagnostic exits with status 1 while any finding remains.
+
+POS event IDs now include store, transaction and SKU. Do not replay old raw POS data into an existing ledger without an ID migration. Aggregate each transaction by SKU before publishing.
 
 ## Review improvements
 

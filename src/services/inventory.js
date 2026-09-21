@@ -1,5 +1,6 @@
 const { createEvent, validateEvent } = require('../shared/events');
 const { newStockRow } = require('../shared/persistence');
+const { getSku } = require('../shared/catalogue');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const PHYSICAL_SOURCES = new Set(['shelf', 'opening', 'delivery']);
@@ -13,6 +14,10 @@ function createInventoryService(options) {
   async function handle(event) {
     validateEvent(event);
     if (event.type !== 'stock.delta') throw new Error('Inventory expects stock.delta');
+    getSku(event.data.skuId);
+    if (event.data.source === 'pos' && event.data.delta >= 0) {
+      throw new Error('POS delta must be negative');
+    }
 
     const result = await store.recordStockEvent(event);
     if (result.duplicate) return result;

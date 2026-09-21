@@ -14,6 +14,9 @@ function createEdgeProcessor(options = {}) {
 
   function processShelf(reading) {
     const { store, shelfId, skuId, grams, ts } = reading;
+    if (!Number.isFinite(grams) || grams < 0) {
+      throw new Error('Shelf grams must be a nonnegative number');
+    }
     const wallTs = reading.wallTs ?? Date.now();
     const item = getSku(skuId);
     const key = store + '/' + shelfId;
@@ -53,6 +56,9 @@ function createEdgeProcessor(options = {}) {
 
   function processPos(sale) {
     getSku(sale.skuId);
+    if (typeof sale.txnId !== 'string' || !sale.txnId.trim()) {
+      throw new Error('POS transaction identifier is required');
+    }
     if (!Number.isFinite(sale.qty) || sale.qty <= 0) {
       throw new Error('POS quantity must be greater than zero');
     }
@@ -62,10 +68,13 @@ function createEdgeProcessor(options = {}) {
       source: 'pos',
       txnId: sale.txnId,
       wallTs: sale.wallTs ?? Date.now()
-    }, { eventId: 'pos-' + sale.txnId, ts: sale.ts });
+    }, { eventId: 'pos-' + [sale.store, sale.txnId, sale.skuId].map(encodeURIComponent).join(':'), ts: sale.ts });
   }
 
   function processTemperature(reading) {
+    if (!Number.isFinite(reading.tempC)) {
+      throw new Error('Temperature must be a finite number');
+    }
     const key = reading.store + '/' + reading.unitId;
     const current = fridges.get(key) || { hotSamples: 0, breached: false };
     fridges.set(key, current);
