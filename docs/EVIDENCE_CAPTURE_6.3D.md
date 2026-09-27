@@ -9,16 +9,16 @@ The OnTrack 6.3D task sheet checked on 27 September 2026 asks for a four to five
 3. `03_mqtt.png`: one raw shelf reading and its signed `stock.delta` event. Hide passwords and the signing key.
 4. `04_atlas.png`: Atlas collection list plus one `stock_events` record and its `stock_levels` result. Show the run ID and timestamps.
 5. `05_business.png`: portal stock, an alert, an order and a delivery route. Show the user role and store scope without showing the token.
-6. `06_aws.png`: CloudFormation complete status, outputs, ECS service health and the CloudFront URL.
-7. `07_scaling_before.png` and `08_scaling_after.png`: equal workload shape, time range and chart scale. Show inventory task count, SQS depth, CPU, memory and processed events per second.
-8. `09_security.png`: HTTPS, private task subnet, IoT policy, encrypted queues, private S3, API 401 and 403 results. Use several readable panels if one image is too small.
+6. `06_aws.png`: EC2 instances, Auto Scaling Group settings and healthy ALB targets.
+7. `07_scaling_before.png` and `08_scaling_after.png`: equal workload shape, time range and chart scale. Show inventory instance count, SQS depth, CPU and processed events per second.
+8. `09_security.png`: security group rules, MQTT password rejection, encrypted queues, API 401 and 403 results. Use several readable panels if one image is too small.
 9. `10_code.png`: GitHub commit or branch, CI result and key code paths. A local test output alone does not prove live AWS behavior.
 
 ## Report layout:
 
 1. Page 1: problem, approved scope and architecture. Explain the sensor, MQTT, Node-RED, AWS and Atlas flow.
 2. Page 2: implemented logic. Explain stock, replenishment, cold chain, multi-order delivery and the portal with one business example.
-3. Page 3: deployment and scaling. Put a before and after table with measured latency, throughput, queue depth, task count, CPU and memory. State whether automatic scale out was observed.
+3. Page 3: deployment and scaling. Put a before and after table with measured latency, throughput, queue depth, instance count and CPU. State whether automatic scale out was observed.
 4. Page 4: security, failure handling, testing and limits. Show controls and the exact test boundary.
 5. Page 5 if needed: results, reflection, code link and tutor feedback response.
 

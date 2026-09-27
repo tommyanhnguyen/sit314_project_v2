@@ -17,5 +17,6 @@ node-red/node_modules/
 node-red/.npm/
 node-red/edge-state.json
 node-red/edge-state.json.tmp
-iot-certs/
+*.pem
+*.key
 .worktrees/

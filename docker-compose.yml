@@ -184,27 +184,5 @@ services:
       INCLUDE_TEMPERATURE: ${INCLUDE_TEMPERATURE:-true}
       RUN_ID: ${RUN_ID:-}
 
-  iot-bridge:
-    build: .
-    command: node src/cloud/iot-bridge.js
-    profiles: ["aws-edge"]
-    restart: unless-stopped
-    depends_on:
-      broker:
-        condition: service_healthy
-      node-red:
-        condition: service_started
-    environment:
-      LOCAL_MQTT_URL: mqtt://broker:1883
-      MQTT_USERNAME: ${MQTT_USERNAME:-}
-      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
-      EVENT_SIGNING_SECRET: ${EVENT_SIGNING_SECRET:-}
-      IOT_ENDPOINT: ${IOT_ENDPOINT:-}
-      IOT_CERT_FILE: /run/iot-certs/device.pem.crt
-      IOT_KEY_FILE: /run/iot-certs/private.pem.key
-      IOT_CA_FILE: /run/iot-certs/AmazonRootCA1.pem
-    volumes:
-      - ${IOT_CERT_DIR:-./iot-certs}:/run/iot-certs:ro
-
 volumes:
   mongo-data:

@@ -18,7 +18,6 @@
     "dead-letter": "SERVICE_NAME=dead-letter node src/service-runner.js",
     "outbox": "node src/outbox-runner.js",
     "aws-worker": "node src/cloud/sqs-runner.js",
-    "iot-bridge": "node src/cloud/iot-bridge.js",
     "cloud-workload": "node src/cloud/workload.js",
     "security-check": "node scripts/security-check.js",
     "auth-token": "node src/auth-token.js",
