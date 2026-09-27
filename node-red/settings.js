@@ -19,29 +19,14 @@ function saveEdgeState(state) {
 }
 
 function loadEdgeProcessor() {
-  const candidates = [
-    process.env.EDGE_PROCESSOR_PATH,
-    '/data/edge/processor',
-    path.join(__dirname, '../src/edge/processor')
-  ].filter(Boolean);
-
-  for (const candidate of candidates) {
-    try {
-      return require(candidate).createEdgeProcessor({ initialState: loadEdgeState() });
-    } catch (error) {
-      if (error.code !== 'MODULE_NOT_FOUND' || !error.message.includes(candidate)) throw error;
-    }
-  }
-  throw new Error('Cannot load the edge processor');
+  return require('./edge').createEdgeProcessor({ initialState: loadEdgeState() });
 }
 
 function signBusinessEvent(event) {
   if (process.env.EVENT_SIGNING_REQUIRED !== 'true') return event;
   const secret = process.env.EVENT_SIGNING_SECRET;
   if (!secret) throw new Error('Event signing secret is required');
-  const modulePath = fs.existsSync('/data/shared/signing.js')
-    ? '/data/shared/signing' : path.join(__dirname, '../src/shared/signing');
-  return require(modulePath).signEvent(event, secret);
+  return require('../src/shared/events').signEvent(event, secret);
 }
 
 module.exports = {

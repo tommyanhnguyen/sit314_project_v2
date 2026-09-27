@@ -1,7 +1,6 @@
 const { randomUUID } = require('node:crypto');
 const config = require('../shared/config');
-const { getSku } = require('../shared/catalogue');
-const { createEvent, validateEvent } = require('../shared/events');
+const { createEvent, getSku, validateEvent } = require('../shared/events');
 
 const CASE_SIZE = 6;
 

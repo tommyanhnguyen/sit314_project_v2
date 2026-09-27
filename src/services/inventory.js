@@ -1,6 +1,5 @@
-const { createEvent, validateEvent } = require('../shared/events');
-const { newStockRow } = require('../shared/persistence');
-const { getSku } = require('../shared/catalogue');
+const { createEvent, getSku, validateEvent } = require('../shared/events');
+const { newStockRow } = require('../shared/store');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const PHYSICAL_SOURCES = new Set(['shelf', 'opening', 'delivery']);

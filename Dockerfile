@@ -10,4 +10,4 @@ COPY --chown=node:node public ./public
 
 USER node
 
-CMD ["node", "src/api/server.js"]
+CMD ["node", "src/api.js"]

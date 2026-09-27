@@ -55,12 +55,12 @@ services:
       - ./node-red/settings.js:/data/settings.js:ro
       - ./node-red/start.js:/data/start.js:ro
       - ./node-red/flows.json:/data/flows.json:ro
-      - ./src/edge:/data/edge:ro
-      - ./src/shared:/data/shared:ro
+      - ./node-red/edge.js:/data/edge.js:ro
+      - ./src/shared:/src/shared:ro
 
   inventory:
     build: .
-    command: node src/service-runner.js
+    command: node src/service.js
     restart: unless-stopped
     depends_on:
       broker:
@@ -73,7 +73,7 @@ services:
 
   replenishment:
     build: .
-    command: node src/service-runner.js
+    command: node src/service.js
     restart: unless-stopped
     depends_on:
       broker:
@@ -86,7 +86,7 @@ services:
 
   cold-chain:
     build: .
-    command: node src/service-runner.js
+    command: node src/service.js
     restart: unless-stopped
     depends_on:
       broker:
@@ -99,7 +99,7 @@ services:
 
   delivery:
     build: .
-    command: node src/service-runner.js
+    command: node src/service.js
     restart: unless-stopped
     depends_on:
       broker:
@@ -112,7 +112,7 @@ services:
 
   dead-letter:
     build: .
-    command: node src/service-runner.js
+    command: node src/service.js
     restart: unless-stopped
     depends_on:
       broker:
@@ -123,21 +123,9 @@ services:
       <<: *service-environment
       SERVICE_NAME: dead-letter
 
-  outbox:
-    build: .
-    command: node src/outbox-runner.js
-    restart: unless-stopped
-    depends_on:
-      broker:
-        condition: service_healthy
-      mongo:
-        condition: service_healthy
-    environment:
-      <<: *service-environment
-
   api:
     build: .
-    command: node src/api/server.js
+    command: node src/api.js
     restart: unless-stopped
     depends_on:
       broker:
@@ -154,7 +142,7 @@ services:
 
   simulator:
     build: .
-    command: node src/simulator.js
+    command: node src/workload.js demo
     profiles: ["demo"]
     depends_on:
       node-red:
@@ -168,7 +156,7 @@ services:
 
   cloud-workload:
     build: .
-    command: node src/cloud/workload.js
+    command: node src/workload.js
     profiles: ["workload"]
     depends_on:
       node-red:

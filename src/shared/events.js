@@ -1,4 +1,4 @@
-const { randomUUID } = require('node:crypto');
+const { createHmac, randomUUID, timingSafeEqual } = require('node:crypto');
 
 const STOCK_SOURCES = new Set(['opening', 'shelf', 'delivery', 'pos']);
 
@@ -80,4 +80,75 @@ function validateEvent(event) {
   return event;
 }
 
-module.exports = { RULES, STOCK_SOURCES, createEvent, validateEvent };
+// Product catalogue
+const ITEMS = {
+  'milk-1l': {
+    skuId: 'milk-1l',
+    name: 'Fresh Milk 1L',
+    unitWeight: 1000,
+    supplier: 'Dairy Distribution Centre',
+    leadTimeDays: 2,
+    price: 3.2
+  },
+  'yoghurt-500g': {
+    skuId: 'yoghurt-500g',
+    name: 'Natural Yoghurt 500g',
+    unitWeight: 500,
+    supplier: 'Dairy Distribution Centre',
+    leadTimeDays: 2,
+    price: 5.5
+  },
+  'rice-1kg': {
+    skuId: 'rice-1kg',
+    name: 'Rice 1kg',
+    unitWeight: 1000,
+    supplier: 'Dry Goods Distribution Centre',
+    leadTimeDays: 3,
+    price: 4.8
+  }
+};
+
+function getSku(skuId) {
+  if (!Object.hasOwn(ITEMS, skuId)) throw new Error('Unknown SKU: ' + skuId);
+  const item = ITEMS[skuId];
+  if (!item) throw new Error('Unknown SKU: ' + skuId);
+  return item;
+}
+
+function listSkus() {
+  return Object.values(ITEMS).map(item => ({ ...item }));
+}
+
+// Event signing
+
+function stable(value) {
+  if (Array.isArray(value)) return '[' + value.map(stable).join(',') + ']';
+  if (value && typeof value === 'object') {
+    return '{' + Object.keys(value).sort().map(key => JSON.stringify(key) + ':' + stable(value[key])).join(',') + '}';
+  }
+  return JSON.stringify(value);
+}
+
+function digest(event, secret) {
+  const unsigned = { ...event };
+  delete unsigned.signature;
+  return createHmac('sha256', secret).update(stable(unsigned)).digest('base64url');
+}
+
+function signEvent(event, secret) {
+  const signed = structuredClone(event);
+  signed.signature = digest(signed, secret);
+  return signed;
+}
+
+function verifyEvent(event, secret) {
+  if (typeof event?.signature !== 'string') throw new Error('Event signature is required');
+  const expected = Buffer.from(digest(event, secret));
+  const supplied = Buffer.from(event.signature);
+  if (expected.length !== supplied.length || !timingSafeEqual(expected, supplied)) {
+    throw new Error('Invalid event signature');
+  }
+  return true;
+}
+
+module.exports = { RULES, STOCK_SOURCES, createEvent, getSku, listSkus, signEvent, stable, validateEvent, verifyEvent };
