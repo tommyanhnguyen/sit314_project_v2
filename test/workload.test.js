@@ -1,6 +1,6 @@
-const test = require('node:test');
 const assert = require('node:assert/strict');
-const { runWorkload } = require('../src/workload');
+const test = require('node:test');
+const { createSimulation, runWorkload } = require('../src/workload');
 
 test('cloud workload simulates every shelf with settled readings and repeatable bursts', async () => {
   const messages = [];
@@ -40,4 +40,15 @@ test('evidence workload can include a new cold chain breach and clear for each s
   assert.equal(result.expectedColdchainAlerts, 4);
   assert.deepEqual(fridge.slice(0, 3).map(row => row.payload.tempC), [6.1, 6.4, 4.1]);
   assert.ok(fridge[0].payload.unitId.includes('trial2'));
+});
+
+test('simulator uses a real wall timestamp on every message', async () => {
+  const messages = [];
+  const floor = Date.now() - 1000;
+  await createSimulation({ stores: 1, publish: async (topic, payload) => messages.push({ topic, payload }) }).run();
+
+  assert.ok(messages.length > 0);
+  for (const message of messages) {
+    assert.ok(message.payload.wallTs >= floor, message.topic + ' has an invalid wallTs');
+  }
 });

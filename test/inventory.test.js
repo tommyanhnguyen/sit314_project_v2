@@ -1,8 +1,7 @@
-const test = require('node:test');
 const assert = require('node:assert/strict');
-
-const { createInventoryService } = require('../src/services/inventory');
+const test = require('node:test');
 const { MemoryStore } = require('./memory-store');
+const { createInventoryService } = require('../src/services/inventory');
 const { createEvent } = require('../src/shared/events');
 
 function delta(eventId, source, amount, ts) {
@@ -57,4 +56,56 @@ test('computes sales velocity after enough history', async () => {
   assert.equal(row.velocityPerDay, 72);
   assert.equal(row.daysToStockout, 0.14);
   assert.equal(published.at(-1).type, 'stock.updated');
+});
+
+test('stock event retry continues after a storage failure', async () => {
+  const store = new MemoryStore();
+  const inventory = createInventoryService({ store, publish: async () => {} });
+  const original = store.applyPhysicalDelta.bind(store);
+  let fail = true;
+  store.applyPhysicalDelta = async event => {
+    if (fail) { fail = false; throw new Error('storage unavailable'); }
+    return original(event);
+  };
+  const event = createEvent('stock.delta', 'store-01', {
+    skuId: 'milk-1l', source: 'opening', delta: 10
+  }, { eventId: 'reliable-stock-1' });
+  await assert.rejects(inventory.handle(event), /storage unavailable/);
+  assert.equal((await inventory.handle(event)).duplicate, false);
+  assert.equal((await store.getStock('store-01', 'milk-1l')).qty, 10);
+});
+
+test('stock retry after publish failure does not apply the delta twice', async () => {
+  const store = new MemoryStore();
+  let fail = true;
+  const events = [];
+  const inventory = createInventoryService({ store, publish: async event => {
+    if (fail) { fail = false; throw new Error('mqtt unavailable'); }
+    events.push(event);
+  } });
+  const event = createEvent('stock.delta', 'store-01', {
+    skuId: 'milk-1l', source: 'opening', delta: 10
+  }, { eventId: 'reliable-stock-2' });
+  await assert.rejects(inventory.handle(event), /mqtt unavailable/);
+  await inventory.handle(event);
+  assert.equal((await store.getStock('store-01', 'milk-1l')).qty, 10);
+  assert.equal(events[0].eventId, 'stock-updated-reliable-stock-2');
+});
+
+test('invalid business stock events are rejected before ledger or stock writes', async () => {
+  for (const data of [
+    { skuId: 'missing', source: 'opening', delta: 1 },
+    { skuId: 'toString', source: 'opening', delta: 1 },
+    { skuId: 'milk-1l', source: 'pos', delta: 0 },
+    { skuId: 'milk-1l', source: 'pos', delta: 1 },
+    { skuId: 'milk-1l', source: 'manual', delta: 1 }
+  ]) {
+    const store = new MemoryStore();
+    const published = [];
+    const inventory = createInventoryService({ store, publish: async event => published.push(event) });
+    await assert.rejects(inventory.handle(createEvent('stock.delta', 'store-01', data)));
+    assert.equal(store.stockEvents.size, 0);
+    assert.deepEqual(await store.listStock(), []);
+    assert.deepEqual(published, []);
+  }
 });

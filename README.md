@@ -29,7 +29,7 @@ src/workload.js          simulated shelves, tills and fridges publish raw MQTT r
 | `src/shared/` | Config, event rules and signing, MongoDB store, MQTT and AWS transport, auth |
 | `node-red/` | Edge flow, edge logic and Node-RED launcher |
 | `public/` | Portal |
-| `test/` | Unit, integration and regression tests. `memory-store.js` is the in memory store used by tests |
+| `test/` | One test file per part of the code, plus `local-flow` for the whole loop. `memory-store.js` is the in memory store used by tests |
 
 ## Run locally
 
