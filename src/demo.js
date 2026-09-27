@@ -72,7 +72,9 @@ async function runLocalDemo(options = {}) {
   }
 
   for (const planned of await store.listDeliveries()) {
-    if (planned.status === 'PLANNED') await delivery.complete(planned.deliveryId);
+    if (planned.status === 'DRAFT' || planned.status === 'PLANNED') {
+      await delivery.complete(planned.deliveryId);
+    }
   }
 
   const stockRows = await store.listStock();

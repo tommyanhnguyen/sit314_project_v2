@@ -2,6 +2,14 @@ const config = require('../shared/config');
 const { getSku } = require('../shared/catalogue');
 const { createEvent } = require('../shared/events');
 
+function evidenceData(reading) {
+  if (reading.runId === undefined) return {};
+  if (typeof reading.runId !== 'string' || !/^[A-Za-z0-9]{1,64}$/.test(reading.runId)) {
+    throw new Error('Invalid evidence run ID');
+  }
+  return { runId: reading.runId };
+}
+
 function createEdgeProcessor(options = {}) {
   const debounceMs = options.debounceMs ?? config.debounceMs;
   const settleBandItems = options.settleBandItems ?? 0.15;
@@ -9,14 +17,16 @@ function createEdgeProcessor(options = {}) {
   const temperatureLimitC = options.temperatureLimitC ?? config.temperatureLimitC;
   const temperatureSamples = options.temperatureSamples ?? config.temperatureSamples;
   const temperatureHysteresisC = options.temperatureHysteresisC ?? config.temperatureHysteresisC;
-  const shelves = new Map();
-  const fridges = new Map();
+  const initialState = options.initialState || {};
+  const shelves = new Map((initialState.shelves || []).map(([key, value]) => [key, { ...value }]));
+  const fridges = new Map((initialState.fridges || []).map(([key, value]) => [key, { ...value }]));
 
   function processShelf(reading) {
     const { store, shelfId, skuId, grams, ts } = reading;
     if (!Number.isFinite(grams) || grams < 0) {
       throw new Error('Shelf grams must be a nonnegative number');
     }
+    const runData = evidenceData(reading);
     const wallTs = reading.wallTs ?? Date.now();
     const item = getSku(skuId);
     const key = store + '/' + shelfId;
@@ -27,7 +37,7 @@ function createEdgeProcessor(options = {}) {
       shelves.set(key, { settledGrams: opening * item.unitWeight, pendingGrams: grams, pendingAt: ts });
       if (opening <= 0) return null;
       return createEvent('stock.delta', store, {
-        skuId, shelfId, delta: opening, source: 'opening', wallTs
+        skuId, shelfId, delta: opening, source: 'opening', wallTs, ...runData
       }, { ts });
     }
 
@@ -50,7 +60,7 @@ function createEdgeProcessor(options = {}) {
     current.settledGrams += delta * item.unitWeight;
     current.pendingAt = ts;
     return createEvent('stock.delta', store, {
-      skuId, shelfId, delta, source: 'shelf', wallTs
+      skuId, shelfId, delta, source: 'shelf', wallTs, ...runData
     }, { ts });
   }
 
@@ -75,6 +85,7 @@ function createEdgeProcessor(options = {}) {
     if (!Number.isFinite(reading.tempC)) {
       throw new Error('Temperature must be a finite number');
     }
+    const runData = evidenceData(reading);
     const key = reading.store + '/' + reading.unitId;
     const current = fridges.get(key) || { hotSamples: 0, breached: false };
     fridges.set(key, current);
@@ -87,7 +98,7 @@ function createEdgeProcessor(options = {}) {
         unitId: reading.unitId,
         tempC: reading.tempC,
         state: 'BREACH',
-        wallTs: reading.wallTs ?? Date.now()
+        wallTs: reading.wallTs ?? Date.now(), ...runData
       }, { ts: reading.ts });
     }
 
@@ -98,11 +109,18 @@ function createEdgeProcessor(options = {}) {
       unitId: reading.unitId,
       tempC: reading.tempC,
       state: 'CLEARED',
-      wallTs: reading.wallTs ?? Date.now()
+      wallTs: reading.wallTs ?? Date.now(), ...runData
     }, { ts: reading.ts });
   }
 
-  return { processShelf, processPos, processTemperature };
+  function snapshot() {
+    return {
+      shelves: [...shelves].map(([key, value]) => [key, { ...value }]),
+      fridges: [...fridges].map(([key, value]) => [key, { ...value }])
+    };
+  }
+
+  return { processShelf, processPos, processTemperature, snapshot };
 }
 
 module.exports = { createEdgeProcessor };

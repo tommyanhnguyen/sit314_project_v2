@@ -35,7 +35,11 @@
     "inputs": 0,
     "x": 160,
     "y": 100,
-    "wires": [["process-shelf"]]
+    "wires": [
+      [
+        "process-shelf"
+      ]
+    ]
   },
   {
     "id": "raw-pos",
@@ -52,7 +56,11 @@
     "inputs": 0,
     "x": 150,
     "y": 180,
-    "wires": [["process-pos"]]
+    "wires": [
+      [
+        "process-pos"
+      ]
+    ]
   },
   {
     "id": "raw-fridge",
@@ -69,14 +77,18 @@
     "inputs": 0,
     "x": 160,
     "y": 260,
-    "wires": [["process-temperature"]]
+    "wires": [
+      [
+        "process-temperature"
+      ]
+    ]
   },
   {
     "id": "process-shelf",
     "type": "function",
     "z": "shelfsense-flow",
     "name": "Settle shelf reading",
-    "func": "const sourceTopic = msg.topic;\nconst raw = msg.payload;\ntry {\n  const reading = typeof raw === 'string' ? JSON.parse(raw) : raw;\n  const event = global.get('edgeProcessor').processShelf(reading);\n  if (!event) return null;\n  msg.topic = 'shelfsense/events/' + event.type;\n  msg.payload = JSON.stringify(event);\n  return [msg, null];\n} catch (error) {\n  msg.topic = 'shelfsense/dead-letter';\n  msg.payload = JSON.stringify({ sourceTopic, reason: error.message, payload: raw, ts: Date.now() });\n  return [null, msg];\n}",
+    "func": "const sourceTopic = msg.topic;\nconst raw = msg.payload;\ntry {\n  const reading = typeof raw === 'string' ? JSON.parse(raw) : raw;\n  const processor = global.get('edgeProcessor');\n  const event = processor.processShelf(reading);\n  const save = global.get('saveEdgeState');\n  if (save) save(processor.snapshot());\n  if (!event) return null;\n  msg.topic = 'shelfsense/events/' + event.type;\n  const sign = global.get('signBusinessEvent');\n  msg.payload = JSON.stringify(sign ? sign(event) : event);\n  return [msg, null];\n} catch (error) {\n  msg.topic = 'shelfsense/dead-letter';\n  msg.payload = JSON.stringify({ sourceTopic, reason: error.message, payload: raw, ts: Date.now() });\n  return [null, msg];\n}",
     "outputs": 2,
     "noerr": 0,
     "initialize": "",
@@ -84,14 +96,21 @@
     "libs": [],
     "x": 430,
     "y": 100,
-    "wires": [["business-output"], ["dead-letter-output"]]
+    "wires": [
+      [
+        "business-output"
+      ],
+      [
+        "dead-letter-output"
+      ]
+    ]
   },
   {
     "id": "process-pos",
     "type": "function",
     "z": "shelfsense-flow",
     "name": "Convert POS sale",
-    "func": "const sourceTopic = msg.topic;\nconst raw = msg.payload;\ntry {\n  const reading = typeof raw === 'string' ? JSON.parse(raw) : raw;\n  const event = global.get('edgeProcessor').processPos(reading);\n  msg.topic = 'shelfsense/events/' + event.type;\n  msg.payload = JSON.stringify(event);\n  return [msg, null];\n} catch (error) {\n  msg.topic = 'shelfsense/dead-letter';\n  msg.payload = JSON.stringify({ sourceTopic, reason: error.message, payload: raw, ts: Date.now() });\n  return [null, msg];\n}",
+    "func": "const sourceTopic = msg.topic;\nconst raw = msg.payload;\ntry {\n  const reading = typeof raw === 'string' ? JSON.parse(raw) : raw;\n  const event = global.get('edgeProcessor').processPos(reading);\n  msg.topic = 'shelfsense/events/' + event.type;\n  const sign = global.get('signBusinessEvent');\n  msg.payload = JSON.stringify(sign ? sign(event) : event);\n  return [msg, null];\n} catch (error) {\n  msg.topic = 'shelfsense/dead-letter';\n  msg.payload = JSON.stringify({ sourceTopic, reason: error.message, payload: raw, ts: Date.now() });\n  return [null, msg];\n}",
     "outputs": 2,
     "noerr": 0,
     "initialize": "",
@@ -99,14 +118,21 @@
     "libs": [],
     "x": 420,
     "y": 180,
-    "wires": [["business-output"], ["dead-letter-output"]]
+    "wires": [
+      [
+        "business-output"
+      ],
+      [
+        "dead-letter-output"
+      ]
+    ]
   },
   {
     "id": "process-temperature",
     "type": "function",
     "z": "shelfsense-flow",
     "name": "Filter temperature",
-    "func": "const sourceTopic = msg.topic;\nconst raw = msg.payload;\ntry {\n  const reading = typeof raw === 'string' ? JSON.parse(raw) : raw;\n  const event = global.get('edgeProcessor').processTemperature(reading);\n  if (!event) return null;\n  msg.topic = 'shelfsense/events/' + event.type;\n  msg.payload = JSON.stringify(event);\n  return [msg, null];\n} catch (error) {\n  msg.topic = 'shelfsense/dead-letter';\n  msg.payload = JSON.stringify({ sourceTopic, reason: error.message, payload: raw, ts: Date.now() });\n  return [null, msg];\n}",
+    "func": "const sourceTopic = msg.topic;\nconst raw = msg.payload;\ntry {\n  const reading = typeof raw === 'string' ? JSON.parse(raw) : raw;\n  const processor = global.get('edgeProcessor');\n  const event = processor.processTemperature(reading);\n  const save = global.get('saveEdgeState');\n  if (save) save(processor.snapshot());\n  if (!event) return null;\n  msg.topic = 'shelfsense/events/' + event.type;\n  const sign = global.get('signBusinessEvent');\n  msg.payload = JSON.stringify(sign ? sign(event) : event);\n  return [msg, null];\n} catch (error) {\n  msg.topic = 'shelfsense/dead-letter';\n  msg.payload = JSON.stringify({ sourceTopic, reason: error.message, payload: raw, ts: Date.now() });\n  return [null, msg];\n}",
     "outputs": 2,
     "noerr": 0,
     "initialize": "",
@@ -114,7 +140,14 @@
     "libs": [],
     "x": 430,
     "y": 260,
-    "wires": [["business-output"], ["dead-letter-output"]]
+    "wires": [
+      [
+        "business-output"
+      ],
+      [
+        "dead-letter-output"
+      ]
+    ]
   },
   {
     "id": "business-output",

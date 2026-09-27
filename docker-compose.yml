@@ -1,6 +1,10 @@
 x-service-environment: &service-environment
   MQTT_URL: mqtt://broker:1883
   MONGODB_URI: ${DOCKER_MONGODB_URI:-mongodb://mongo:27017/shelfsense}
+  MQTT_USERNAME: ${MQTT_USERNAME:-}
+  MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+  EVENT_SIGNING_REQUIRED: ${EVENT_SIGNING_REQUIRED:-false}
+  EVENT_SIGNING_SECRET: ${EVENT_SIGNING_SECRET:-}
 
 services:
   mongo:
@@ -20,8 +24,10 @@ services:
     restart: unless-stopped
     environment:
       MQTT_PORT: 1883
+      MQTT_USERNAME: ${MQTT_USERNAME:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
     ports:
-      - "1883:1883"
+      - "127.0.0.1:1883:1883"
     healthcheck:
       test: ["CMD", "node", "-e", "const s=require('net').connect(1883,'127.0.0.1',()=>{s.end();process.exit(0)});s.on('error',()=>process.exit(1))"]
       interval: 5s
@@ -30,6 +36,7 @@ services:
 
   node-red:
     image: nodered/node-red:4.0.9
+    command: node /data/start.js
     restart: unless-stopped
     depends_on:
       broker:
@@ -37,11 +44,17 @@ services:
     environment:
       MQTT_HOST: broker
       MQTT_PORT: 1883
+      MQTT_USERNAME: ${MQTT_USERNAME:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+      EVENT_SIGNING_REQUIRED: ${EVENT_SIGNING_REQUIRED:-false}
+      EVENT_SIGNING_SECRET: ${EVENT_SIGNING_SECRET:-}
+      NODE_RED_ADMIN_PASSWORD_HASH: ${NODE_RED_ADMIN_PASSWORD_HASH:-}
     ports:
-      - "1880:1880"
+      - "127.0.0.1:1880:1880"
     volumes:
       - ./node-red/settings.js:/data/settings.js:ro
-      - ./node-red/flows.json:/data/flows.json
+      - ./node-red/start.js:/data/start.js:ro
+      - ./node-red/flows.json:/data/flows.json:ro
       - ./src/edge:/data/edge:ro
       - ./src/shared:/data/shared:ro
 
@@ -110,6 +123,18 @@ services:
       <<: *service-environment
       SERVICE_NAME: dead-letter
 
+  outbox:
+    build: .
+    command: node src/outbox-runner.js
+    restart: unless-stopped
+    depends_on:
+      broker:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    environment:
+      <<: *service-environment
+
   api:
     build: .
     command: node src/api/server.js
@@ -122,8 +147,10 @@ services:
     environment:
       <<: *service-environment
       PORT: 3000
+      API_AUTH_REQUIRED: ${API_AUTH_REQUIRED:-false}
+      API_AUTH_SECRET: ${API_AUTH_SECRET:-}
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
 
   simulator:
     build: .
@@ -134,8 +161,50 @@ services:
         condition: service_started
     environment:
       MQTT_URL: mqtt://broker:1883
+      MQTT_USERNAME: ${MQTT_USERNAME:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
       STORES: 2
       STARTUP_DELAY_MS: 8000
+
+  cloud-workload:
+    build: .
+    command: node src/cloud/workload.js
+    profiles: ["workload"]
+    depends_on:
+      node-red:
+        condition: service_started
+    environment:
+      MQTT_URL: mqtt://broker:1883
+      MQTT_USERNAME: ${MQTT_USERNAME:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+      STORES: ${STORES:-20}
+      SHELVES_PER_STORE: ${SHELVES_PER_STORE:-50}
+      BURSTS: ${BURSTS:-10}
+      WORKLOAD_CONCURRENCY: ${WORKLOAD_CONCURRENCY:-100}
+      INCLUDE_TEMPERATURE: ${INCLUDE_TEMPERATURE:-true}
+      RUN_ID: ${RUN_ID:-}
+
+  iot-bridge:
+    build: .
+    command: node src/cloud/iot-bridge.js
+    profiles: ["aws-edge"]
+    restart: unless-stopped
+    depends_on:
+      broker:
+        condition: service_healthy
+      node-red:
+        condition: service_started
+    environment:
+      LOCAL_MQTT_URL: mqtt://broker:1883
+      MQTT_USERNAME: ${MQTT_USERNAME:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+      EVENT_SIGNING_SECRET: ${EVENT_SIGNING_SECRET:-}
+      IOT_ENDPOINT: ${IOT_ENDPOINT:-}
+      IOT_CERT_FILE: /run/iot-certs/device.pem.crt
+      IOT_KEY_FILE: /run/iot-certs/private.pem.key
+      IOT_CA_FILE: /run/iot-certs/AmazonRootCA1.pem
+    volumes:
+      - ${IOT_CERT_DIR:-./iot-certs}:/run/iot-certs:ro
 
 volumes:
   mongo-data:

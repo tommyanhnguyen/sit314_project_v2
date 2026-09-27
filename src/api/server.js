@@ -1,11 +1,14 @@
 const http = require('node:http');
+const https = require('node:https');
 const fs = require('node:fs');
 const path = require('node:path');
 const config = require('../shared/config');
 const { MongoStore } = require('../shared/persistence');
-const { createEvent } = require('../shared/events');
-const { connectMqtt, eventTopic, publishJson } = require('../shared/mqtt');
+const { authorize, verifyToken } = require('../shared/auth');
+const { openEventPublisher } = require('../shared/event-publisher');
 const { createDeliveryService } = require('../services/delivery');
+const { createReplenishmentService } = require('../services/replenishment');
+const { assertProductionConfig } = require('../shared/production-config');
 
 const CONTENT_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -16,6 +19,50 @@ const CONTENT_TYPES = {
 function sendJson(response, status, value) {
   response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
   response.end(JSON.stringify(value));
+}
+
+function securityHeaders(response) {
+  response.setHeader('content-security-policy', "default-src 'self'; script-src 'self'; style-src 'self'");
+  response.setHeader('x-content-type-options', 'nosniff');
+  response.setHeader('x-frame-options', 'DENY');
+  response.setHeader('referrer-policy', 'no-referrer');
+  response.setHeader('strict-transport-security', 'max-age=31536000');
+}
+
+function bearerClaims(request, secret, now) {
+  const header = request.headers.authorization || '';
+  if (!header.startsWith('Bearer ')) {
+    const error = new Error('Bearer token is required');
+    error.status = 401;
+    throw error;
+  }
+  try {
+    return verifyToken(header.slice(7), secret, now());
+  } catch (cause) {
+    const error = new Error(cause.message);
+    error.status = 401;
+    throw error;
+  }
+}
+
+function requireAccess(claims, role, store) {
+  try { return authorize(claims, role, store); } catch (cause) {
+    const error = new Error(cause.message);
+    error.status = 403;
+    throw error;
+  }
+}
+
+function requireAllStores(claims, role, stores) {
+  if (!Array.isArray(stores) || stores.length === 0) return requireAccess(claims, role);
+  for (const store of stores) requireAccess(claims, role, store);
+}
+
+function filterForClaims(rows, claims) {
+  if (!claims || claims.stores === '*') return rows;
+  const allowed = new Set(claims.stores || []);
+  return rows.filter(row => row.stores?.length
+    ? row.stores.every(store => allowed.has(store)) : allowed.has(row.store));
 }
 
 async function readJson(request) {
@@ -30,15 +77,25 @@ async function readJson(request) {
 function createApiServer(options) {
   const { store, publish } = options;
   const deliveries = createDeliveryService({ store, publish });
+  const replenishment = createReplenishmentService({ store, publish });
   const publicDir = path.resolve(options.publicDir || path.join(__dirname, '../../public'));
+  const authRequired = options.authRequired ?? config.apiAuthRequired;
+  const authSecret = options.authSecret || config.apiAuthSecret;
+  const now = options.now || Date.now;
 
-  return http.createServer(async (request, response) => {
+  const handler = async (request, response) => {
     try {
+      securityHeaders(response);
       const url = new URL(request.url, 'http://localhost');
+      if (url.pathname.startsWith('/api/')) response.setHeader('cache-control', 'no-store');
 
       if (request.method === 'GET' && url.pathname === '/health') {
-        return sendJson(response, 200, { status: 'ok' });
+        const ready = store.isReady ? store.isReady() : true;
+        return sendJson(response, ready ? 200 : 503, { status: ready ? 'ok' : 'unavailable' });
       }
+      const claims = authRequired && url.pathname.startsWith('/api/')
+        ? bearerClaims(request, authSecret, now)
+        : null;
 
       const readers = {
         '/api/stock': () => store.listStock(),
@@ -47,7 +104,7 @@ function createApiServer(options) {
         '/api/deliveries': () => store.listDeliveries()
       };
       if (request.method === 'GET' && readers[url.pathname]) {
-        return sendJson(response, 200, await readers[url.pathname]());
+        return sendJson(response, 200, filterForClaims(await readers[url.pathname](), claims));
       }
 
       const approval = url.pathname.match(/^\/api\/orders\/([^/]+)\/approve$/);
@@ -59,26 +116,52 @@ function createApiServer(options) {
 
         const current = await store.getOrder(decodeURIComponent(approval[1]));
         if (!current) return sendJson(response, 404, { error: 'Order not found' });
+        if (authRequired) requireAccess(claims, 'manager', current.store);
         if (current.status !== 'PENDING_APPROVAL') {
           return sendJson(response, 409, { error: 'Order is not pending approval' });
         }
 
-        const order = await store.approveOrder(current.orderId, input.approvedBy.trim());
-        const event = createEvent('order.approved', order.store, {
-          orderId: order.orderId,
-          approvedBy: order.approvedBy
-        });
-        await publish(event);
+        const order = await replenishment.approve(current.orderId, input.approvedBy.trim());
         return sendJson(response, 200, order);
       }
 
       const completion = url.pathname.match(/^\/api\/deliveries\/([^/]+)\/complete$/);
       if (request.method === 'POST' && completion) {
         const deliveryId = decodeURIComponent(completion[1]);
-        if (!await store.getDelivery(deliveryId)) {
+        const current = await store.getDelivery(deliveryId);
+        if (!current) {
           return sendJson(response, 404, { error: 'Delivery not found' });
         }
+        if (authRequired) requireAllStores(claims, 'driver', current.stores || [current.store]);
         return sendJson(response, 200, await deliveries.complete(deliveryId));
+      }
+
+      const dispatch = url.pathname.match(/^\/api\/deliveries\/([^/]+)\/dispatch$/);
+      if (request.method === 'POST' && dispatch) {
+        const deliveryId = decodeURIComponent(dispatch[1]);
+        const current = await store.getDelivery(deliveryId);
+        if (!current) return sendJson(response, 404, { error: 'Delivery not found' });
+        if (authRequired) requireAllStores(claims, 'supplier', current.stores || [current.store]);
+        return sendJson(response, 200, await deliveries.dispatch(deliveryId));
+      }
+
+      const start = url.pathname.match(/^\/api\/deliveries\/([^/]+)\/start$/);
+      if (request.method === 'POST' && start) {
+        const deliveryId = decodeURIComponent(start[1]);
+        const current = await store.getDelivery(deliveryId);
+        if (!current) return sendJson(response, 404, { error: 'Delivery not found' });
+        if (authRequired) requireAllStores(claims, 'driver', current.stores || [current.store]);
+        return sendJson(response, 200, await deliveries.start(deliveryId));
+      }
+
+      const stopCompletion = url.pathname.match(/^\/api\/deliveries\/([^/]+)\/stops\/([^/]+)\/complete$/);
+      if (request.method === 'POST' && stopCompletion) {
+        const deliveryId = decodeURIComponent(stopCompletion[1]);
+        if (!await store.getDelivery(deliveryId)) return sendJson(response, 404, { error: 'Delivery not found' });
+        if (authRequired) requireAccess(claims, 'driver', decodeURIComponent(stopCompletion[2]));
+        return sendJson(response, 200, await deliveries.completeStop(
+          deliveryId, decodeURIComponent(stopCompletion[2])
+        ));
       }
 
       if (request.method !== 'GET') return sendJson(response, 404, { error: 'Not found' });
@@ -91,24 +174,31 @@ function createApiServer(options) {
       response.writeHead(200, { 'content-type': CONTENT_TYPES[path.extname(filePath)] || 'application/octet-stream' });
       fs.createReadStream(filePath).pipe(response);
     } catch (error) {
-      sendJson(response, 400, { error: error.message });
+      sendJson(response, error.status || 400, { error: error.message });
     }
-  });
+  };
+  return options.tls
+    ? https.createServer({ key: options.tls.key, cert: options.tls.cert }, handler)
+    : http.createServer(handler);
 }
 
 async function startApi() {
+  if (process.env.EVENT_TRANSPORT === 'aws') assertProductionConfig(process.env, 'api');
   const store = await MongoStore.connect(config.mongoUri);
-  const client = await connectMqtt(config.mqttUrl, 'shelfsense-api-' + process.pid);
+  const transport = await openEventPublisher('shelfsense-api-' + process.pid);
   const server = createApiServer({
     store,
-    publish: event => publishJson(client, eventTopic(event.type), event)
+    publish: transport.publish,
+    tls: config.tlsKeyFile && config.tlsCertFile ? {
+      key: fs.readFileSync(config.tlsKeyFile), cert: fs.readFileSync(config.tlsCertFile)
+    } : null
   });
   await new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(config.port, resolve);
   });
-  console.log('API ready on port ' + config.port);
-  return { client, server, store };
+  console.log((config.tlsKeyFile ? 'HTTPS' : 'HTTP') + ' API ready on port ' + config.port);
+  return { transport, server, store };
 }
 
 if (require.main === module) {
@@ -118,4 +208,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { createApiServer, readJson, startApi };
+module.exports = { bearerClaims, createApiServer, filterForClaims, readJson, startApi };

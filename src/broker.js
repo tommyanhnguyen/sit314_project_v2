@@ -1,14 +1,18 @@
 const net = require('node:net');
+const { timingSafeEqual } = require('node:crypto');
 
-async function startBroker(port = Number(process.env.MQTT_PORT || 1883)) {
+async function startBroker(port = Number(process.env.MQTT_PORT || 1883), credentials = {}) {
   const { Aedes } = require('aedes');
-  const username = process.env.MQTT_USERNAME;
-  const password = process.env.MQTT_PASSWORD;
+  const username = credentials.username ?? process.env.MQTT_USERNAME;
+  const password = credentials.password ?? process.env.MQTT_PASSWORD;
   const options = {};
 
   if (username && password) {
     options.authenticate = (client, givenUser, givenPassword, done) => {
-      const valid = givenUser === username && givenPassword?.toString() === password;
+      const expected = Buffer.from(password);
+      const supplied = Buffer.isBuffer(givenPassword) ? givenPassword : Buffer.from(givenPassword || '');
+      const valid = givenUser === username && expected.length === supplied.length
+        && timingSafeEqual(expected, supplied);
       done(null, valid);
     };
   }

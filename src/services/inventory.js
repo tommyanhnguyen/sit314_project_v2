@@ -19,8 +19,10 @@ function createInventoryService(options) {
       throw new Error('POS delta must be negative');
     }
 
-    const result = await store.recordStockEvent(event);
-    if (result.duplicate) return result;
+    const result = store.beginStockEvent
+      ? await store.beginStockEvent(event)
+      : await store.recordStockEvent(event);
+    if (result.complete || (result.duplicate && !store.beginStockEvent)) return { duplicate: true };
 
     if (PHYSICAL_SOURCES.has(event.data.source)) {
       await store.applyPhysicalDelta(event);
@@ -42,9 +44,10 @@ function createInventoryService(options) {
       velocityPerDay: row.velocityPerDay,
       daysToStockout: row.daysToStockout,
       latencyMs
-    }, { ts: event.ts });
+    }, { eventId: 'stock-updated-' + event.eventId, ts: event.ts });
 
     await publish(update);
+    if (store.completeStockEvent) await store.completeStockEvent(event.eventId);
     return { duplicate: false, row, event: update };
   }
 

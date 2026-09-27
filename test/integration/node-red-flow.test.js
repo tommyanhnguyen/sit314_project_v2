@@ -5,6 +5,7 @@ const path = require('node:path');
 
 const { createEdgeProcessor } = require('../../src/edge/processor');
 const { validateEvent } = require('../../src/shared/events');
+const { signEvent, verifyEvent } = require('../../src/shared/signing');
 
 const flow = JSON.parse(fs.readFileSync(path.join(__dirname, '../../node-red/flows.json'), 'utf8'));
 
@@ -14,9 +15,10 @@ function findNode(name) {
   return node;
 }
 
-function runFunctionNode(name, msg, edge) {
+function runFunctionNode(name, msg, edge, signBusinessEvent) {
   const body = new Function('msg', 'global', findNode(name).func);
-  return body(msg, { get: key => key === 'edgeProcessor' ? edge : undefined });
+  return body(msg, { get: key => key === 'edgeProcessor' ? edge
+    : key === 'signBusinessEvent' ? signBusinessEvent : undefined });
 }
 
 function shelfMessage(payload) {
@@ -33,6 +35,11 @@ test('every MQTT input passes UTF-8 text to its function', () => {
   for (const node of flow.filter(item => item.type === 'mqtt in')) {
     assert.equal(node.datatype, 'utf8');
   }
+});
+
+test('Node-RED flow does not embed broker credentials', () => {
+  const broker = flow.find(node => node.type === 'mqtt-broker');
+  assert.equal(broker.credentials, undefined);
 });
 
 test('valid shelf JSON leaves on the business output', () => {
@@ -96,4 +103,24 @@ test('temperature breach leaves on the business output', () => {
   assert.equal(runFunctionNode('Filter temperature', message(6.1), edge), null);
   const [business] = runFunctionNode('Filter temperature', message(6.4), edge);
   assert.equal(JSON.parse(business.payload).data.state, 'BREACH');
+});
+
+test('edge functions sign outgoing business events when signing is enabled', () => {
+  const signing = event => signEvent(event, 'edge-signing-secret');
+  const shelf = runFunctionNode('Settle shelf reading', shelfMessage(JSON.stringify({
+    store: 'store-01', shelfId: 'shelf-1', skuId: 'milk-1l', grams: 10000, ts: 0
+  })), createEdgeProcessor(), signing)[0];
+  const pos = runFunctionNode('Convert POS sale', {
+    topic: 'shelfsense/raw/store-01/pos',
+    payload: JSON.stringify({ store: 'store-01', skuId: 'milk-1l', qty: 1, txnId: 'x', ts: 1 })
+  }, createEdgeProcessor(), signing)[0];
+  const edge = createEdgeProcessor({ temperatureSamples: 2 });
+  const temperature = value => ({ topic: 'shelfsense/raw/store-01/fridge/fridge-1',
+    payload: JSON.stringify({ store: 'store-01', unitId: 'fridge-1', tempC: value, ts: 1 }) });
+  runFunctionNode('Filter temperature', temperature(6.1), edge, signing);
+  const alert = runFunctionNode('Filter temperature', temperature(6.4), edge, signing)[0];
+
+  for (const message of [shelf, pos, alert]) {
+    assert.equal(verifyEvent(JSON.parse(message.payload), 'edge-signing-secret'), true);
+  }
 });

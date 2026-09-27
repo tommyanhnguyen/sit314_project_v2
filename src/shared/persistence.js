@@ -27,6 +27,7 @@ function newStockRow(store, skuId) {
 class MemoryStore {
   constructor() {
     this.stockEvents = new Map();
+    this.stockApplications = new Set();
     this.stock = new Map();
     this.orders = new Map();
     this.alerts = new Map();
@@ -40,11 +41,28 @@ class MemoryStore {
     return { duplicate: false };
   }
 
+  async beginStockEvent(event) {
+    const existing = this.stockEvents.get(event.eventId);
+    if (existing) return { duplicate: true, complete: existing.status !== 'PROCESSING' };
+    this.stockEvents.set(event.eventId, { event: structuredClone(event), status: 'PROCESSING' });
+    return { duplicate: false, complete: false };
+  }
+
+  async completeStockEvent(eventId) {
+    const record = this.stockEvents.get(eventId);
+    if (!record) throw new Error('Unknown stock event: ' + eventId);
+    if (record.event) record.status = 'APPLIED';
+    return true;
+  }
+
   async applyPhysicalDelta(event) {
     const { skuId, delta } = event.data;
     const key = stockKey(event.store, skuId);
     const row = this.stock.get(key) || newStockRow(event.store, skuId);
-    row.qty += delta;
+    if (!this.stockApplications.has(event.eventId)) {
+      row.qty += delta;
+      this.stockApplications.add(event.eventId);
+    }
     row.updatedAt = event.ts;
     this.stock.set(key, row);
     return structuredClone(row);
@@ -54,10 +72,13 @@ class MemoryStore {
     const { skuId, delta } = event.data;
     const key = stockKey(event.store, skuId);
     const row = this.stock.get(key) || newStockRow(event.store, skuId);
-    row.soldUnits += Math.abs(delta);
-    row.saleCount += 1;
-    row.firstSaleTs = row.firstSaleTs === null ? event.ts : Math.min(row.firstSaleTs, event.ts);
-    row.lastSaleTs = row.lastSaleTs === null ? event.ts : Math.max(row.lastSaleTs, event.ts);
+    if (!this.stockApplications.has(event.eventId)) {
+      row.soldUnits += Math.abs(delta);
+      row.saleCount += 1;
+      row.firstSaleTs = row.firstSaleTs === null ? event.ts : Math.min(row.firstSaleTs, event.ts);
+      row.lastSaleTs = row.lastSaleTs === null ? event.ts : Math.max(row.lastSaleTs, event.ts);
+      this.stockApplications.add(event.eventId);
+    }
     row.updatedAt = event.ts;
     this.stock.set(key, row);
     return structuredClone(row);
@@ -124,13 +145,38 @@ class MemoryStore {
     return structuredClone(order);
   }
 
+  async approveOrderWithPendingEvent(orderId, approvedBy, approvedAt, event) {
+    const order = this.orders.get(orderId);
+    if (!order) return null;
+    if (order.status === 'PENDING_APPROVAL') {
+      order.status = 'APPROVED';
+      order.approvedBy = approvedBy;
+      order.approvedAt = approvedAt;
+      order.pendingApprovalEvent = structuredClone(event);
+    }
+    return { order: structuredClone(order), event: structuredClone(order.pendingApprovalEvent || null) };
+  }
+
+  async listPendingApprovalEvents() {
+    return [...this.orders.values()].filter(order => order.pendingApprovalEvent)
+      .map(order => structuredClone(order.pendingApprovalEvent));
+  }
+
+  async markApprovalPublished(eventId) {
+    const order = [...this.orders.values()].find(item => item.pendingApprovalEvent?.eventId === eventId);
+    if (order) delete order.pendingApprovalEvent;
+    return Boolean(order);
+  }
+
   async listOrders() {
     return [...this.orders.values()].map(order => structuredClone(order));
   }
 
   async saveAlert(alert) {
-    this.alerts.set(alert.eventId, structuredClone(alert));
-    return structuredClone(alert);
+    if (!this.alerts.has(alert.eventId)) {
+      this.alerts.set(alert.eventId, structuredClone({ ...alert, receivedAt: Date.now() }));
+    }
+    return structuredClone(this.alerts.get(alert.eventId));
   }
 
   async listAlerts() {
@@ -139,6 +185,37 @@ class MemoryStore {
 
   async saveDelivery(delivery) {
     this.deliveries.set(delivery.deliveryId, structuredClone(delivery));
+    return structuredClone(delivery);
+  }
+
+  async addOrderToDeliveryBatch(order, candidate) {
+    const assigned = [...this.deliveries.values()].find(item => item.orderIds?.includes(order.orderId));
+    if (assigned) return structuredClone(assigned);
+    let delivery = [...this.deliveries.values()].find(item =>
+      item.batchKey === candidate.batchKey && item.status === 'DRAFT'
+    );
+    if (!delivery) delivery = structuredClone(candidate);
+    if (!delivery.orderIds.includes(order.orderId)) delivery.orderIds.push(order.orderId);
+    if (!delivery.stores.includes(order.store)) delivery.stores.push(order.store);
+    this.deliveries.set(delivery.deliveryId, delivery);
+    return structuredClone(delivery);
+  }
+
+  async dispatchDelivery(deliveryId, update) {
+    const delivery = this.deliveries.get(deliveryId);
+    if (!delivery) return null;
+    if (delivery.status !== 'DRAFT') return structuredClone(delivery);
+    Object.assign(delivery, structuredClone(update));
+    return structuredClone(delivery);
+  }
+
+  async startDelivery(deliveryId, startedAt) {
+    const delivery = this.deliveries.get(deliveryId);
+    if (!delivery || !['PLANNED', 'IN_TRANSIT'].includes(delivery.status)) return null;
+    if (delivery.status === 'PLANNED') {
+      delivery.status = 'IN_TRANSIT';
+      delivery.startedAt = startedAt;
+    }
     return structuredClone(delivery);
   }
 
@@ -161,6 +238,8 @@ class MemoryStore {
   }
 
   async close() {}
+
+  isReady() { return true; }
 }
 
 class MongoStore {
@@ -183,10 +262,20 @@ class MongoStore {
     this.db = this.connection.db;
     await Promise.all([
       this.db.collection('stock_events').createIndex({ eventId: 1 }, { unique: true }),
+      this.db.collection('stock_events').createIndex({ 'event.data.runId': 1, status: 1 }),
       this.db.collection('stock_levels').createIndex({ store: 1, skuId: 1 }, { unique: true }),
       this.db.collection('orders').createIndex({ orderId: 1 }, { unique: true }),
       this.db.collection('coldchain').createIndex({ eventId: 1 }, { unique: true }),
-      this.db.collection('deliveries').createIndex({ deliveryId: 1 }, { unique: true })
+      this.db.collection('coldchain').createIndex({ 'data.runId': 1 }),
+      this.db.collection('deliveries').createIndex({ deliveryId: 1 }, { unique: true }),
+      this.db.collection('deliveries').createIndex({ orderIds: 1 }, {
+        name: 'delivery_order_unique', unique: true,
+        partialFilterExpression: { orderIds: { $type: 'array' } }
+      }),
+      this.db.collection('deliveries').createIndex({ batchKey: 1 }, {
+        name: 'open_delivery_batch_unique', unique: true,
+        partialFilterExpression: { batchKey: { $type: 'string' }, status: 'DRAFT' }
+      })
     ]);
     await this.ensureOpenOrderIndex();
     return this;
@@ -238,8 +327,35 @@ class MongoStore {
     }
   }
 
+  async beginStockEvent(event) {
+    try {
+      await this.db.collection('stock_events').insertOne({
+        eventId: event.eventId,
+        event,
+        status: 'PROCESSING',
+        createdAt: Date.now()
+      });
+      return { duplicate: false, complete: false };
+    } catch (error) {
+      if (error.code !== 11000) throw error;
+      const existing = await this.db.collection('stock_events').findOne(
+        { eventId: event.eventId }, { projection: { status: 1 } }
+      );
+      return { duplicate: true, complete: existing?.status === 'APPLIED' };
+    }
+  }
+
+  async completeStockEvent(eventId) {
+    await this.db.collection('stock_events').updateOne(
+      { eventId }, { $set: { status: 'APPLIED', appliedAt: Date.now() } }
+    );
+    return true;
+  }
+
   async applyPhysicalDelta(event) {
     const { skuId, delta } = event.data;
+    const eventIds = { $ifNull: ['$appliedEventIds', []] };
+    const alreadyApplied = { $in: [event.eventId, eventIds] };
     await this.db.collection('stock_levels').updateOne(
       { store: event.store, skuId },
       [
@@ -247,14 +363,15 @@ class MongoStore {
           $set: {
             store: event.store,
             skuId,
-            qty: { $add: [{ $ifNull: ['$qty', 0] }, delta] },
+            qty: { $cond: [alreadyApplied, { $ifNull: ['$qty', 0] }, { $add: [{ $ifNull: ['$qty', 0] }, delta] }] },
             soldUnits: { $ifNull: ['$soldUnits', 0] },
             saleCount: { $ifNull: ['$saleCount', 0] },
             firstSaleTs: { $ifNull: ['$firstSaleTs', null] },
             lastSaleTs: { $ifNull: ['$lastSaleTs', null] },
             velocityPerDay: { $ifNull: ['$velocityPerDay', 0] },
             daysToStockout: { $ifNull: ['$daysToStockout', null] },
-            updatedAt: event.ts
+            updatedAt: { $cond: [alreadyApplied, { $ifNull: ['$updatedAt', null] }, event.ts] },
+            appliedEventIds: { $setUnion: [eventIds, [event.eventId]] }
           }
         }
       ],
@@ -266,6 +383,8 @@ class MongoStore {
   async recordSale(event) {
     const { skuId, delta } = event.data;
     const sold = Math.abs(delta);
+    const eventIds = { $ifNull: ['$appliedEventIds', []] };
+    const alreadyApplied = { $in: [event.eventId, eventIds] };
     await this.db.collection('stock_levels').updateOne(
       { store: event.store, skuId },
       [
@@ -274,13 +393,14 @@ class MongoStore {
             store: event.store,
             skuId,
             qty: { $ifNull: ['$qty', 0] },
-            soldUnits: { $add: [{ $ifNull: ['$soldUnits', 0] }, sold] },
-            saleCount: { $add: [{ $ifNull: ['$saleCount', 0] }, 1] },
-            firstSaleTs: { $cond: [{ $eq: [{ $ifNull: ['$firstSaleTs', null] }, null] }, event.ts, { $min: ['$firstSaleTs', event.ts] }] },
-            lastSaleTs: { $cond: [{ $eq: [{ $ifNull: ['$lastSaleTs', null] }, null] }, event.ts, { $max: ['$lastSaleTs', event.ts] }] },
+            soldUnits: { $cond: [alreadyApplied, { $ifNull: ['$soldUnits', 0] }, { $add: [{ $ifNull: ['$soldUnits', 0] }, sold] }] },
+            saleCount: { $cond: [alreadyApplied, { $ifNull: ['$saleCount', 0] }, { $add: [{ $ifNull: ['$saleCount', 0] }, 1] }] },
+            firstSaleTs: { $cond: [alreadyApplied, { $ifNull: ['$firstSaleTs', null] }, { $cond: [{ $eq: [{ $ifNull: ['$firstSaleTs', null] }, null] }, event.ts, { $min: ['$firstSaleTs', event.ts] }] }] },
+            lastSaleTs: { $cond: [alreadyApplied, { $ifNull: ['$lastSaleTs', null] }, { $cond: [{ $eq: [{ $ifNull: ['$lastSaleTs', null] }, null] }, event.ts, { $max: ['$lastSaleTs', event.ts] }] }] },
             velocityPerDay: { $ifNull: ['$velocityPerDay', 0] },
             daysToStockout: { $ifNull: ['$daysToStockout', null] },
-            updatedAt: event.ts
+            updatedAt: { $cond: [alreadyApplied, { $ifNull: ['$updatedAt', null] }, event.ts] },
+            appliedEventIds: { $setUnion: [eventIds, [event.eventId]] }
           }
         }
       ],
@@ -290,7 +410,9 @@ class MongoStore {
   }
 
   async getStock(store, skuId) {
-    return this.db.collection('stock_levels').findOne({ store, skuId }, { projection: { _id: 0 } });
+    return this.db.collection('stock_levels').findOne(
+      { store, skuId }, { projection: { _id: 0, appliedEventIds: 0 } }
+    );
   }
 
   async saveStock(row) {
@@ -318,7 +440,7 @@ class MongoStore {
   }
 
   async listStock() {
-    return this.db.collection('stock_levels').find({}, { projection: { _id: 0 } }).toArray();
+    return this.db.collection('stock_levels').find({}, { projection: { _id: 0, appliedEventIds: 0 } }).toArray();
   }
 
   async saveOrder(order) {
@@ -345,6 +467,32 @@ class MongoStore {
     );
   }
 
+  async approveOrderWithPendingEvent(orderId, approvedBy, approvedAt, event) {
+    const orders = this.db.collection('orders');
+    let order = await orders.findOneAndUpdate(
+      { orderId, status: 'PENDING_APPROVAL' },
+      { $set: { status: 'APPROVED', approvedBy, approvedAt, pendingApprovalEvent: event } },
+      { returnDocument: 'after', projection: { _id: 0 } }
+    );
+    if (!order) order = await orders.findOne({ orderId }, { projection: { _id: 0 } });
+    if (!order) return null;
+    return { order, event: order.pendingApprovalEvent || null };
+  }
+
+  async listPendingApprovalEvents() {
+    const rows = await this.db.collection('orders').find(
+      { pendingApprovalEvent: { $exists: true } }, { projection: { _id: 0, pendingApprovalEvent: 1 } }
+    ).toArray();
+    return rows.map(row => row.pendingApprovalEvent);
+  }
+
+  async markApprovalPublished(eventId) {
+    const result = await this.db.collection('orders').updateOne(
+      { 'pendingApprovalEvent.eventId': eventId }, { $unset: { pendingApprovalEvent: '' } }
+    );
+    return result.modifiedCount === 1;
+  }
+
   async closeOrder(orderId, status = 'DELIVERED', closedAt = Date.now()) {
     return this.db.collection('orders').findOneAndUpdate(
       { orderId },
@@ -358,7 +506,8 @@ class MongoStore {
   }
 
   async saveAlert(alert) {
-    await this.db.collection('coldchain').updateOne({ eventId: alert.eventId }, { $setOnInsert: alert }, { upsert: true });
+    await this.db.collection('coldchain').updateOne({ eventId: alert.eventId },
+      { $setOnInsert: { ...alert, receivedAt: Date.now() } }, { upsert: true });
     return alert;
   }
 
@@ -369,6 +518,53 @@ class MongoStore {
   async saveDelivery(delivery) {
     await this.db.collection('deliveries').updateOne({ deliveryId: delivery.deliveryId }, { $set: delivery }, { upsert: true });
     return delivery;
+  }
+
+  async addOrderToDeliveryBatch(order, candidate) {
+    const deliveries = this.db.collection('deliveries');
+    const assigned = await deliveries.findOne({ orderIds: order.orderId }, { projection: { _id: 0 } });
+    if (assigned) return assigned;
+    try {
+      return await deliveries.findOneAndUpdate(
+        { batchKey: candidate.batchKey, status: 'DRAFT' },
+        [{ $set: {
+          deliveryId: { $ifNull: ['$deliveryId', candidate.deliveryId] },
+          batchKey: { $ifNull: ['$batchKey', candidate.batchKey] },
+          supplier: { $ifNull: ['$supplier', candidate.supplier] },
+          region: { $ifNull: ['$region', candidate.region] },
+          route: { $ifNull: ['$route', []] },
+          stops: { $ifNull: ['$stops', []] },
+          status: { $ifNull: ['$status', 'DRAFT'] },
+          createdAt: { $ifNull: ['$createdAt', candidate.createdAt] },
+          orderIds: { $setUnion: [{ $ifNull: ['$orderIds', []] }, [order.orderId]] },
+          stores: { $setUnion: [{ $ifNull: ['$stores', []] }, [order.store]] }
+        } }],
+        { upsert: true, returnDocument: 'after', projection: { _id: 0 } }
+      );
+    } catch (error) {
+      if (error.code !== 11000) throw error;
+      return deliveries.findOne({
+        $or: [{ orderIds: order.orderId }, { batchKey: candidate.batchKey, status: 'DRAFT' }]
+      }, { projection: { _id: 0 } });
+    }
+  }
+
+  async dispatchDelivery(deliveryId, update) {
+    const updated = await this.db.collection('deliveries').findOneAndUpdate(
+      { deliveryId, status: 'DRAFT' }, { $set: update },
+      { returnDocument: 'after', projection: { _id: 0 } }
+    );
+    return updated || this.getDelivery(deliveryId);
+  }
+
+  async startDelivery(deliveryId, startedAt) {
+    const updated = await this.db.collection('deliveries').findOneAndUpdate(
+      { deliveryId, status: 'PLANNED' }, { $set: { status: 'IN_TRANSIT', startedAt } },
+      { returnDocument: 'after', projection: { _id: 0 } }
+    );
+    return updated || this.db.collection('deliveries').findOne(
+      { deliveryId, status: 'IN_TRANSIT' }, { projection: { _id: 0 } }
+    );
   }
 
   async getDelivery(deliveryId) {
@@ -391,6 +587,8 @@ class MongoStore {
   async close() {
     if (this.connection) await this.connection.close();
   }
+
+  isReady() { return this.connection?.readyState === 1; }
 }
 
 module.exports = {

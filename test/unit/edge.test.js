@@ -15,6 +15,18 @@ test('emits opening stock from the first shelf reading', () => {
   assert.equal(event.data.source, 'opening');
 });
 
+test('edge events carry the evidence run ID through shelf and fridge processing', () => {
+  const edge = createEdgeProcessor({ temperatureSamples: 2 });
+  const stock = edge.processShelf({ store: 'store-01', shelfId: 'trial', skuId: 'milk-1l',
+    grams: 10000, ts: 0, runId: 'trial1' });
+  edge.processTemperature({ store: 'store-01', unitId: 'cold', tempC: 6.1,
+    ts: 0, runId: 'trial1' });
+  const alert = edge.processTemperature({ store: 'store-01', unitId: 'cold', tempC: 6.4,
+    ts: 1, runId: 'trial1' });
+  assert.equal(stock.data.runId, 'trial1');
+  assert.equal(alert.data.runId, 'trial1');
+});
+
 test('emits one stock delta after a shelf change settles', () => {
   const edge = createEdgeProcessor({ debounceMs: 100 });
   edge.processShelf({ store: 'store-01', shelfId: 's1', skuId: 'milk-1l', grams: 10000, ts: 0, wallTs: 0 });
@@ -63,4 +75,21 @@ test('emits one breach and one clear event with hysteresis', () => {
   assert.equal(edge.processTemperature({ store: 'store-01', unitId: 'f1', tempC: 6.2, ts: 2 }).data.state, 'BREACH');
   assert.equal(edge.processTemperature({ store: 'store-01', unitId: 'f1', tempC: 6.1, ts: 3 }), null);
   assert.equal(edge.processTemperature({ store: 'store-01', unitId: 'f1', tempC: 4.1, ts: 4 }).data.state, 'CLEARED');
+});
+
+test('restores shelf and fridge state after an edge restart', () => {
+  const first = createEdgeProcessor({ debounceMs: 100, temperatureSamples: 2 });
+  first.processShelf({ store: 'store-01', shelfId: 's1', skuId: 'milk-1l', grams: 10000, ts: 0 });
+  first.processTemperature({ store: 'store-01', unitId: 'f1', tempC: 6, ts: 0 });
+  const restored = createEdgeProcessor({
+    debounceMs: 100,
+    temperatureSamples: 2,
+    initialState: first.snapshot()
+  });
+  assert.equal(restored.processShelf({
+    store: 'store-01', shelfId: 's1', skuId: 'milk-1l', grams: 10000, ts: 1000
+  }), null);
+  assert.equal(restored.processTemperature({
+    store: 'store-01', unitId: 'f1', tempC: 6, ts: 1
+  }).data.state, 'BREACH');
 });

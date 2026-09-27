@@ -16,6 +16,12 @@
     "cold-chain": "SERVICE_NAME=cold-chain node src/service-runner.js",
     "delivery": "SERVICE_NAME=delivery node src/service-runner.js",
     "dead-letter": "SERVICE_NAME=dead-letter node src/service-runner.js",
+    "outbox": "node src/outbox-runner.js",
+    "aws-worker": "node src/cloud/sqs-runner.js",
+    "iot-bridge": "node src/cloud/iot-bridge.js",
+    "cloud-workload": "node src/cloud/workload.js",
+    "security-check": "node scripts/security-check.js",
+    "auth-token": "node src/auth-token.js",
     "node-red": "npx --yes node-red@4.0.9 --userDir node-red",
     "watch": "mqtt sub -t \"shelfsense/#\" -h localhost -v",
     "check-config": "node src/check-config.js && docker compose config --quiet",
@@ -28,6 +34,8 @@
   "author": "Tommy Nguyen 224345482",
   "license": "ISC",
   "dependencies": {
+    "@aws-sdk/client-sns": "3.1141.0",
+    "@aws-sdk/client-sqs": "3.1141.0",
     "aedes": "^1.1.2",
     "mongoose": "^8.9.5",
     "mqtt": "^5.10.1"

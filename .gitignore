@@ -11,7 +11,11 @@ npm-debug.log*
 node-red/.config.*
 node-red/.sessions.json
 node-red/flows_cred.json
+node-red/*_cred.json
 node-red/lib/
 node-red/node_modules/
 node-red/.npm/
+node-red/edge-state.json
+node-red/edge-state.json.tmp
+iot-certs/
 .worktrees/

@@ -61,14 +61,18 @@ function createReplenishmentService(options) {
   async function approve(orderId, approvedBy) {
     const current = await store.getOrder(orderId);
     if (!current) throw new Error('Unknown order: ' + orderId);
-    if (current.status !== 'PENDING_APPROVAL') return current;
-
-    const order = await store.approveOrder(orderId, approvedBy, now());
-    await publish(createEvent('order.approved', order.store, {
-      orderId: order.orderId,
+    if (!['PENDING_APPROVAL', 'APPROVED'].includes(current.status)) return current;
+    const event = createEvent('order.approved', current.store, {
+      orderId: current.orderId,
       approvedBy
-    }));
-    return order;
+    }, { eventId: 'order-approved-' + current.orderId });
+    const result = store.approveOrderWithPendingEvent
+      ? await store.approveOrderWithPendingEvent(orderId, approvedBy, now(), event)
+      : { order: await store.approveOrder(orderId, approvedBy, now()), event };
+    if (!result.event) return result.order;
+    await publish(result.event);
+    if (store.markApprovalPublished) await store.markApprovalPublished(result.event.eventId);
+    return result.order;
   }
 
   return { approve, handleStockUpdated };

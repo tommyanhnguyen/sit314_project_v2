@@ -9,11 +9,17 @@
 <body>
   <header>
     <div>
-      <p class="eyebrow">SIT314 local operations</p>
+      <p class="eyebrow">SIT314 operations</p>
       <h1>ShelfSense</h1>
     </div>
     <button id="refresh">Refresh data</button>
   </header>
+
+  <section aria-label="API access">
+    <label for="auth-token">Role token</label>
+    <input id="auth-token" type="password" autocomplete="off" placeholder="Paste a manager, supplier or driver token">
+    <button id="use-token" type="button">Use token</button>
+  </section>
 
   <main>
     <section>
@@ -29,7 +35,7 @@
       <div id="alerts" class="cards"></div>
     </section>
     <section>
-      <h2>Deliveries</h2>
+      <h2>Supplier and driver deliveries</h2>
       <div id="deliveries" class="cards"></div>
     </section>
   </main>

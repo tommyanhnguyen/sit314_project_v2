@@ -34,6 +34,14 @@ test('serves stock through the API', async t => {
   assert.equal(rows[0].qty, 4);
 });
 
+test('health reports unavailable when the database connection is lost', async t => {
+  const api = await startTestApi();
+  t.after(() => new Promise(resolve => api.server.close(resolve)));
+  api.store.isReady = () => false;
+  const response = await fetch(api.baseUrl + '/health');
+  assert.equal(response.status, 503);
+});
+
 test('approves a pending order and publishes the decision', async t => {
   const api = await startTestApi();
   t.after(() => new Promise(resolve => api.server.close(resolve)));
@@ -80,6 +88,30 @@ test('returns 404 for an unknown delivery', async t => {
 
   const response = await fetch(api.baseUrl + '/api/deliveries/missing/complete', { method: 'POST' });
   assert.equal(response.status, 404);
+});
+
+test('dispatches, starts and completes one stop in a delivery batch', async t => {
+  const api = await startTestApi();
+  t.after(() => new Promise(resolve => api.server.close(resolve)));
+  for (const [orderId, storeId] of [['batch-o1', 'store-01'], ['batch-o2', 'store-02']]) {
+    await api.store.saveOrder({ orderId, store: storeId, supplier: 'Dairy Distribution Centre',
+      openKey: storeId + '/milk-1l', lines: [{ skuId: 'milk-1l', qty: 6 }], status: 'IN_DELIVERY' });
+  }
+  await api.store.saveDelivery({
+    deliveryId: 'batch-1', batchKey: 'dairy:east', supplier: 'Dairy Distribution Centre',
+    region: 'melbourne-east', orderIds: ['batch-o1', 'batch-o2'], stores: ['store-01', 'store-02'],
+    route: [], stops: [], status: 'DRAFT', createdAt: 1
+  });
+
+  let response = await fetch(api.baseUrl + '/api/deliveries/batch-1/dispatch', { method: 'POST' });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).stops.length, 2);
+  response = await fetch(api.baseUrl + '/api/deliveries/batch-1/start', { method: 'POST' });
+  assert.equal((await response.json()).status, 'IN_TRANSIT');
+  response = await fetch(api.baseUrl + '/api/deliveries/batch-1/stops/store-01/complete', { method: 'POST' });
+  const delivery = await response.json();
+  assert.equal(delivery.status, 'IN_TRANSIT');
+  assert.equal(delivery.stops[0].status, 'DELIVERED');
 });
 
 test('serves the manager portal', async t => {

@@ -34,9 +34,9 @@ const RULES = {
   },
   'delivery.created': {
     deliveryId: 'string',
-    orderId: 'string',
+    orderIds: 'array',
     route: 'array',
-    eta: 'number'
+    stops: 'array'
   },
   'delivery.status': {
     deliveryId: 'string',

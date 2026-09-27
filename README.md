@@ -1,144 +1,50 @@
-# ShelfSense V2
+# ShelfSense V2:
 
-ShelfSense is a local IoT stock management system for the SIT314 Distinction project.
+ShelfSense is the SIT314 IoT Distinction project. It tracks shelf stock and fridge temperature, predicts replenishment needs, batches supplier orders, and shows delivery progress. The local system uses Node.js, MQTT, Node-RED and MongoDB. The AWS path uses IoT Core, SQS, SNS, ECS Fargate, an HTTPS load balancer, S3, CloudFront and CloudWatch.
 
-This version demonstrates the local business loop. The final audit found open recovery and concurrency gaps. AWS deployment, CloudWatch scaling evidence, IAM, and X.509 certificates remain in the next phase.
-
-## Final project audit: 22 September 2026
-
-Read [the audit](docs/FINAL_PROJECT_AUDIT.md) for progress against the original brief, the project plan and tutor feedback. [The checklist](docs/FINAL_PROJECT_CHECKLIST.md) lists the remaining assessment work.
-
-`npm run check` verifies the current regression suite and local demo. It does not prove AWS readiness. Run `node scripts/audit-local-gaps.js` to reproduce four open recovery and concurrency findings. That diagnostic exits with status 1 while any finding remains.
-
-POS event IDs now include store, transaction and SKU. Do not replay old raw POS data into an existing ledger without an ID migration. Aggregate each transaction by SKU before publishing.
-
-## Review improvements
-
-1. A delivered order releases its open order key, so the same SKU can be ordered again.
-2. Delivery restock is retryable when MQTT publication fails.
-3. Invalid stock sources and invalid POS quantities are rejected.
-4. Sensor timestamps are separate from processing latency timestamps.
-5. Backlog is measured while producer and consumers run together.
-6. Node-RED routes malformed JSON to the dead letter topic.
-
-## What is included
-
-1. Node.js shelf, POS, and fridge simulation.
-2. Node-RED edge processing.
-3. Inventory, replenishment, cold-chain, and delivery services.
-4. MQTT event communication.
-5. MongoDB persistence with Atlas support.
-6. A small manager portal.
-7. Unit, integration, resilience, and local load checks.
-
-## Local data flow
+## Code flow:
 
 ```text
-Simulators
-    ↓
-MQTT broker
-    ↓
-Node-RED edge flow
-    ↓
-Business event topics
-    ↓
-Four Node.js services
-    ↓
-MongoDB
-    ↓
-API and manager portal
+Arduino or simulator
+  → raw MQTT topics
+  → Node-RED validation, debounce and temperature logic
+  → signed business events
+  → local Node.js services or AWS IoT Core and SQS workers
+  → inventory, replenishment, cold chain and delivery services
+  → MongoDB Atlas
+  → authenticated API and portal
 ```
 
-## Quick logic demo
+The core file map is:
 
-This command runs without Docker or MongoDB:
+| Stage | Code | What to inspect |
+| --- | --- | --- |
+| Shelf and fridge input | `hardware/smart-shelf/`, `src/simulator.js` | Raw MQTT data |
+| Edge logic | `node-red/flows.json`, `src/edge/processor.js` | Debounce and breach transitions |
+| Local messaging | `src/broker.js`, `src/service-runner.js` | MQTT routing and validation |
+| AWS messaging | `src/cloud/iot-bridge.js`, `src/cloud/sqs-runner.js` | IoT Core, SQS and SNS |
+| Stock and order rules | `src/services/` | Inventory, replenishment and delivery |
+| Persistence | `src/shared/persistence.js` | `stock_events`, `stock_levels`, `orders`, `deliveries`, `coldchain` |
+| Portal | `src/api/server.js`, `public/` | Scoped reads and role actions through CloudFront |
+| Cloud resources | `infra/aws/template.json` | ECS, queues, scaling, HTTPS and logging |
 
-```bash
-npm install
-npm test
-npm run demo
-npm run load-test
-npm run evidence
-```
-
-The demo uses the same domain services with an in memory adapter. It runs the complete local loop from sensing to order approval, delivery completion, and restocking.
-
-## Full local system
-
-Start the broker, MongoDB, Node-RED, four services, dead letter consumer, and API:
+## Run locally:
 
 ```bash
-docker compose up --build
-```
-
-Publish the sample sensor stream:
-
-```bash
+npm ci
+npm run check-ci
+docker compose up --build -d
 docker compose --profile demo run --rm simulator
 ```
 
-Open these local pages:
+Open `http://localhost:3000` for the portal and `http://localhost:1880` for Node-RED. The broker and both UIs bind to your computer only. The Docker stack uses local MongoDB by default. To use Atlas, set `DOCKER_MONGODB_URI` in an ignored `.env` file. `docker compose down` stops the stack.
 
-1. Manager portal: `http://localhost:3000`
-2. Node-RED editor: `http://localhost:1880`
+The `npm run demo` result uses an in memory database. It proves the business loop without Docker. `npm run load-test` is an in process baseline. Its numbers are not AWS scaling evidence.
 
-`NODE_RED_TESTING.md` explains the automated and live edge flow checks.
+## Prepare AWS evidence:
 
-Stop the system:
+Follow [the AWS deployment and evidence guide](infra/aws/README.md). It lists account prerequisites, the edge bridge, the before and after scaling workload, Atlas queries and security screenshots. The GitHub workflow builds an ECR image and deploys the CloudFormation stack after the required environment variables are set.
 
-```bash
-docker compose down
-```
+Run `npm run security-check` to scan project files for likely credentials. Run `npm audit --omit=dev --audit-level=high` for dependency advisories. The AWS API requires signed, one hour role tokens. Create an operator token with `npm run auth-token -- manager store-01` after setting `API_AUTH_SECRET` securely.
 
-## MongoDB Atlas
-
-Docker Compose uses local MongoDB by default. Set `MONGODB_URI` for services started directly on your computer. Set `DOCKER_MONGODB_URI` when Docker services should connect to Atlas.
-
-Never place an Atlas username or password in source code. `.env.example` contains safe variable names only.
-
-## Main event topics
-
-| Topic | Purpose |
-| --- | --- |
-| `shelfsense/raw/+/shelf/+` | Raw shelf weights |
-| `shelfsense/raw/+/pos` | Raw POS sales |
-| `shelfsense/raw/+/fridge/+` | Raw temperatures |
-| `shelfsense/events/stock.delta` | Physical and demand stock events |
-| `shelfsense/events/stock.updated` | Current stock projection |
-| `shelfsense/events/coldchain.alert` | Temperature state changes |
-| `shelfsense/events/order.approved` | Approved replenishment orders |
-| `shelfsense/dead-letter` | Rejected messages |
-
-## API
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| GET | `/health` | Process health |
-| GET | `/api/stock` | Current stock |
-| GET | `/api/orders` | Replenishment orders |
-| GET | `/api/alerts` | Cold-chain alerts |
-| GET | `/api/deliveries` | Planned deliveries |
-| POST | `/api/orders/:id/approve` | Manager approval |
-| POST | `/api/deliveries/:id/complete` | Complete a delivery and restock the shelf |
-
-Approval body:
-
-```json
-{
-  "approvedBy": "manager:tommy"
-}
-```
-
-## Local metrics
-
-`npm run load-test` reports processed events, elapsed time, throughput, median latency, p95 latency, peak backlog, and mean backlog. Producer and consumers run together.
-
-This is an in-process baseline. It does not use MQTT or MongoDB. It prepares the later AWS comparison, but it is not AWS scaling evidence.
-
-`npm run evidence` runs the demo and several consumer settings. It writes reproducible report data inside the ignored `report_evidence/` directory.
-
-## Current security boundary
-
-Secrets come from environment variables. Input is validated. Bad messages use the dead letter path. The local broker can use a username and password through `MQTT_USERNAME` and `MQTT_PASSWORD`.
-
-TLS, user authentication, store scoped authorisation, IAM, X.509, and Secrets Manager belong to the AWS secure deployment phase.
+The code and generated infrastructure template have local checks. AWS deployment, Docker runtime, Atlas connectivity and actual scaling still require live verification in your account. The older [audit](docs/FINAL_PROJECT_AUDIT.md) is dated 22 September 2026 and records the earlier project state.

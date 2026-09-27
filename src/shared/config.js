@@ -12,5 +12,11 @@ module.exports = {
   temperatureSamples: numberFromEnv('TEMPERATURE_SAMPLES', 2),
   temperatureHysteresisC: numberFromEnv('TEMPERATURE_HYSTERESIS_C', 0.8),
   autoApproveUnder: numberFromEnv('AUTO_APPROVE_UNDER', 150),
-  safetyDays: numberFromEnv('SAFETY_DAYS', 1)
+  safetyDays: numberFromEnv('SAFETY_DAYS', 1),
+  apiAuthRequired: process.env.API_AUTH_REQUIRED === 'true',
+  apiAuthSecret: process.env.API_AUTH_SECRET || '',
+  eventSigningRequired: process.env.EVENT_SIGNING_REQUIRED === 'true',
+  eventSigningSecret: process.env.EVENT_SIGNING_SECRET || '',
+  tlsKeyFile: process.env.TLS_KEY_FILE || '',
+  tlsCertFile: process.env.TLS_CERT_FILE || ''
 };

@@ -5,6 +5,20 @@ const containers = {
   deliveries: document.querySelector('#deliveries')
 };
 const status = document.querySelector('#status');
+let accessToken = '';
+
+async function apiFetch(url, options = {}) {
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      ...(options.headers || {}),
+      ...(accessToken ? { authorization: 'Bearer ' + accessToken } : {})
+    }
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || 'Request failed');
+  return result;
+}
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>'"]/g, character => ({
@@ -17,18 +31,19 @@ function card(lines, action = '') {
 }
 
 async function approve(orderId) {
-  const response = await fetch(`/api/orders/${encodeURIComponent(orderId)}/approve`, {
+  await apiFetch(`/api/orders/${encodeURIComponent(orderId)}/approve`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ approvedBy: 'manager:tommy' })
   });
-  if (!response.ok) throw new Error((await response.json()).error);
   await loadData();
 }
 
-async function complete(deliveryId) {
-  const response = await fetch(`/api/deliveries/${encodeURIComponent(deliveryId)}/complete`, { method: 'POST' });
-  if (!response.ok) throw new Error((await response.json()).error);
+async function deliveryAction(deliveryId, action, store = '') {
+  const suffix = action === 'stop'
+    ? `/stops/${encodeURIComponent(store)}/complete`
+    : `/${action}`;
+  await apiFetch(`/api/deliveries/${encodeURIComponent(deliveryId)}${suffix}`, { method: 'POST' });
   await loadData();
 }
 
@@ -36,7 +51,7 @@ async function loadData() {
   status.textContent = 'Loading...';
   try {
     const [stock, orders, alerts, deliveries] = await Promise.all(
-      ['stock', 'orders', 'alerts', 'deliveries'].map(name => fetch('/api/' + name).then(response => response.json()))
+      ['stock', 'orders', 'alerts', 'deliveries'].map(name => apiFetch('/api/' + name))
     );
 
     containers.stock.innerHTML = stock.map(row => card([
@@ -58,10 +73,18 @@ async function loadData() {
 
     containers.deliveries.innerHTML = deliveries.map(delivery => card([
       `<strong>${escapeHtml(delivery.deliveryId)}</strong>`,
-      `${escapeHtml(delivery.store)} · ${escapeHtml(delivery.status)}`
-    ], ['PLANNED', 'RESTOCK_PENDING'].includes(delivery.status)
-      ? `<button data-delivery="${escapeHtml(delivery.deliveryId)}">Mark arrived</button>`
-      : '')).join('') || '<p>No deliveries.</p>';
+      `${escapeHtml(delivery.region || delivery.store)} · ${escapeHtml(delivery.status)}`,
+      delivery.route?.length ? `Route: ${delivery.route.map(escapeHtml).join(' → ')}` : 'Route not dispatched',
+      ...(delivery.stops || []).map(stop => `${escapeHtml(stop.store)} · ${escapeHtml(stop.status)} · ETA ${new Date(stop.eta).toLocaleTimeString()}`)
+    ], delivery.status === 'DRAFT'
+      ? `<button data-delivery="${escapeHtml(delivery.deliveryId)}" data-action="dispatch">Dispatch batch</button>`
+      : delivery.status === 'PLANNED'
+        ? `<button data-delivery="${escapeHtml(delivery.deliveryId)}" data-action="start">Start route</button>`
+        : delivery.status === 'IN_TRANSIT'
+          ? (delivery.stops || []).filter(stop => stop.status !== 'DELIVERED').map(stop =>
+            `<button data-delivery="${escapeHtml(delivery.deliveryId)}" data-action="stop" data-store="${escapeHtml(stop.store)}">Complete ${escapeHtml(stop.store)}</button>`
+          ).join('')
+          : '')).join('') || '<p>No deliveries.</p>';
 
     status.textContent = 'Data updated.';
   } catch (error) {
@@ -75,7 +98,14 @@ containers.orders.addEventListener('click', event => {
 });
 containers.deliveries.addEventListener('click', event => {
   const deliveryId = event.target.dataset.delivery;
-  if (deliveryId) complete(deliveryId).catch(error => { status.textContent = error.message; });
+  if (deliveryId) deliveryAction(deliveryId, event.target.dataset.action, event.target.dataset.store)
+    .catch(error => { status.textContent = error.message; });
 });
 document.querySelector('#refresh').addEventListener('click', loadData);
+document.querySelector('#use-token').addEventListener('click', () => {
+  const input = document.querySelector('#auth-token');
+  accessToken = input.value.trim();
+  input.value = '';
+  loadData();
+});
 loadData();
